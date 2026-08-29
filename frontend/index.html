@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cross-Channel Money Mule Detection</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/lib/vis-9.1.2/vis-network.css">
+  <link rel="stylesheet" href="/lib/tom-select/tom-select.css">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="/lib/vis-9.1.2/vis-network.min.js"></script>
+  <script src="/lib/tom-select/tom-select.complete.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body class="app-shell">
+  <div class="app-bg"></div>
+  <div class="app-noise"></div>
+
+  <div id="global-loader" class="loader-overlay">
+    <div class="loader-card">
+      <div class="loader-ring"></div>
+      <p id="loader-text">Bootstrapping fraud intelligence...</p>
+    </div>
+  </div>
+
+  <div id="toast-stack" class="toast-stack"></div>
+
+  <header class="site-header">
+    <div class="site-wrap">
+      <section class="hero-panel">
+        <div class="hero-panel__copy">
+          <span class="eyebrow">Adaptive Fraud Intelligence</span>
+          <h1>Cross-Channel Money Mule Detection System</h1>
+          <p>Graph-based, explainable, adaptive, real-time fraud detection with full Streamlit feature parity.</p>
+        </div>
+        <div class="hero-panel__actions">
+          <div class="status-pill">
+            <span class="status-dot" id="api-status-dot"></span>
+            <span id="api-status-text">Connecting...</span>
+          </div>
+          <div class="hero-action-row">
+            <button id="reset-session-btn" class="secondary-btn" type="button">Reset Session</button>
+            <button id="simulate-attack-btn" class="primary-btn" type="button">Simulate Coordinated Attack</button>
+          </div>
+        </div>
+      </section>
+    </div>
+  </header>
+
+  <main class="site-wrap site-main">
+    <section class="metrics-grid">
+      <article class="metric-card"><span>Suspicious Accounts</span><strong id="metric-suspicious">0</strong></article>
+      <article class="metric-card"><span>Active Accounts</span><strong id="metric-active-accounts">--</strong></article>
+      <article class="metric-card"><span>TPS</span><strong id="metric-tps">0.00</strong></article>
+      <article class="metric-card"><span>Total Transactions</span><strong id="metric-total-transactions">0</strong></article>
+      <article class="metric-card"><span>Fraud Accounts</span><strong id="metric-fraud">0</strong></article>
+      <article class="metric-card"><span>Banned Accounts</span><strong id="metric-banned">0</strong></article>
+    </section>
+
+    <section class="full-bleed-stage full-bleed-stage--main">
+      <article class="graph-stage-card graph-stage-card--hero">
+        <div class="panel-head panel-head--graph">
+          <div>
+            <span class="panel-kicker">Network Intelligence</span>
+            <h2>Live Transaction Network</h2>
+          </div>
+          <div class="legend-strip">
+            <span><i class="legend-dot normal"></i>Normal</span>
+            <span><i class="legend-dot early"></i>Early Warning</span>
+            <span><i class="legend-dot fraud"></i>Fraud</span>
+            <span><i class="legend-dot banned"></i>Banned</span>
+          </div>
+        </div>
+        <details class="info-disclosure">
+          <summary>How the Graph Works</summary>
+          <div class="disclosure-copy">
+            <p>Transactions are polled live, new accounts are introduced continuously, and node states update as accounts move from normal to early-warning, fraud, or banned.</p>
+            <p>Hover nodes for account details, click nodes to focus the investigation panel, and use replay to inspect the latest attack-only subgraph.</p>
+          </div>
+        </details>
+        <div id="live-network-frame" class="network-stage-frame">
+          <div id="live-network" class="network-shell network-shell--hero"></div>
+          <canvas id="live-network-overlay" class="network-overlay"></canvas>
+        </div>
+      </article>
+    </section>
+
+    <section class="full-bleed-stage full-bleed-stage--replay">
+      <article class="graph-stage-card graph-stage-card--replay">
+        <div class="panel-head panel-head--graph">
+          <div>
+            <span class="panel-kicker">Replay</span>
+            <h2>Attack Subgraph</h2>
+          </div>
+          <div class="stat-chip" id="attack-replay-meta">Waiting for attack...</div>
+        </div>
+        <details class="info-disclosure">
+          <summary>How Replay Works</summary>
+          <div class="disclosure-copy">
+            <p>The replay isolates only the confirmed attack cluster and replays the transaction sequence step by step after each reveal.</p>
+          </div>
+        </details>
+        <div id="attack-network-frame" class="network-stage-frame">
+          <div id="attack-network" class="network-shell network-shell--replay"></div>
+          <canvas id="attack-network-overlay" class="network-overlay"></canvas>
+        </div>
+      </article>
+    </section>
+
+    <section class="operations-stage">
+      <article class="panel-card panel-card--feature">
+        <div class="panel-head">
+          <div>
+            <span class="panel-kicker">Live Intelligence</span>
+            <h2>Suspicious Account Monitor</h2>
+          </div>
+          <div class="stat-chip" id="early-warning-count">0 suspicious</div>
+        </div>
+        <details id="early-warning-details" class="info-disclosure">
+          <summary>How Suspicious Scoring Works</summary>
+          <div class="disclosure-copy">
+            <p id="early-warning-explainer-intro">The learning engine watches every transaction, builds risk from live signals, and slowly decays risk back toward blue when behavior normalizes.</p>
+            <div id="early-warning-explainer" class="explainer-stack"></div>
+          </div>
+        </details>
+        <div class="stats-row stats-row--two">
+          <div class="mini-metric"><span>Suspicious Accounts</span><strong id="early-warning-metric">0</strong></div>
+          <div class="mini-metric"><span>Adaptive Threshold</span><strong id="adaptive-threshold">0.000</strong></div>
+        </div>
+        <p id="early-warning-message" class="section-message">Waiting for account activity.</p>
+        <div class="monitor-stack">
+          <div class="chart-shell chart-shell--monitor">
+            <canvas id="suspicion-chart"></canvas>
+          </div>
+          <div class="subpanel-card">
+            <button
+              class="collapse-toggle"
+              type="button"
+              data-collapsible-trigger="early-warning-collapse"
+              aria-expanded="false"
+            >
+              <span class="collapse-toggle__text">
+                <strong>Suspicious Account List</strong>
+                <small>Collapsed by default. Expand to inspect suspicious yellow nodes.</small>
+              </span>
+              <span class="collapse-toggle__meta">Show</span>
+              <span class="collapse-toggle__icon" aria-hidden="true"></span>
+            </button>
+            <div id="early-warning-collapse" class="collapsible-panel">
+              <div class="collapsible-panel__inner">
+                <div id="early-warning-table" class="table-shell table-shell--scroll table-shell--tall"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel-card panel-card--control">
+        <div class="panel-head">
+          <div>
+            <span class="panel-kicker">Attack Controls</span>
+            <h2>Simulation Command Center</h2>
+          </div>
+          <div class="stacked-meta">
+            <span class="stat-chip" id="attack-active-chip">Active: --</span>
+            <span class="stat-chip danger" id="attack-banned-chip">Banned: 0</span>
+          </div>
+        </div>
+        <div class="control-grid control-grid--stacked">
+          <button id="simulate-attack-btn-secondary" class="primary-btn" type="button">Run Detection Pipeline</button>
+          <button id="replay-attack-btn" class="secondary-btn" type="button" disabled>Replay Attack Flow</button>
+          <button id="mute-siren-btn" class="ghost-btn" type="button">Mute Siren</button>
+        </div>
+        <div class="alert-board">
+          <div class="alert-strip" id="attack-alert-strip">No simulated attack yet. Live monitoring is active.</div>
+          <div class="stats-row stats-row--one">
+            <div class="mini-metric"><span>Suspicious Accounts</span><strong id="metric-suspicious-control">0</strong></div>
+            <div class="mini-metric"><span>Attack Pattern</span><strong id="metric-attack-pattern">Idle</strong></div>
+          </div>
+        </div>
+        <div class="feed-grid feed-grid--stacked">
+          <div class="feed-card">
+            <div class="feed-title">Live Transactions</div>
+            <div id="tx-feed" class="feed-list"></div>
+          </div>
+          <div class="feed-card">
+            <div class="feed-title">Fraud Transactions</div>
+            <div id="suspicious-feed" class="feed-list"></div>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section id="post-detection" class="post-detection hidden">
+      <div id="post-detection-loader" class="section-loader hidden">
+        <div class="section-loader-card">
+          <div class="loader-ring small"></div>
+          <div>
+            <strong>Detection in progress</strong>
+            <p>Graph is live. ML, rules, GNN, and investigation panels are still loading.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="dashboard-grid dashboard-grid--insights">
+        <article class="panel-card">
+          <div class="panel-head">
+            <div>
+              <span class="panel-kicker">Response</span>
+              <h2>Ban Fraud Accounts</h2>
+            </div>
+            <div class="stat-chip danger" id="ban-chip">Awaiting results</div>
+          </div>
+          <div class="select-shell">
+            <select id="ban-select" multiple placeholder="Select accounts to ban..."></select>
+          </div>
+          <div class="action-strip">
+            <button id="ban-select-all-btn" class="secondary-btn" type="button">Select All Fraud Accounts</button>
+            <button id="ban-selected-btn" class="danger-btn" type="button">Ban Selected</button>
+          </div>
+          <div class="subpanel-card">
+            <button class="collapse-toggle" type="button" data-collapsible-trigger="banned-accounts-collapse" aria-expanded="false">
+              <span class="collapse-toggle__text">
+                <strong>Banned Account List</strong>
+                <small>Expand to inspect all currently banned accounts.</small>
+              </span>
+              <span class="collapse-toggle__meta">Show</span>
+              <span class="collapse-toggle__icon" aria-hidden="true"></span>
+            </button>
+            <div id="banned-accounts-collapse" class="collapsible-panel">
+              <div class="collapsible-panel__inner">
+                <div id="banned-accounts-list" class="token-stream"></div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="panel-card">
+          <div class="panel-head">
+            <div>
+              <span class="panel-kicker">Behavior Shift</span>
+              <h2>Behavioral Drift Detection</h2>
+            </div>
+            <div class="stat-chip" id="drift-chip">No baseline</div>
+          </div>
+          <p id="drift-message" class="section-message"></p>
+          <div class="subpanel-card">
+            <button class="collapse-toggle" type="button" data-collapsible-trigger="drift-table-collapse" aria-expanded="false">
+              <span class="collapse-toggle__text">
+                <strong>Drift Account List</strong>
+                <small>Expand to inspect all behavioral drift alerts.</small>
+              </span>
+              <span class="collapse-toggle__meta">Show</span>
+              <span class="collapse-toggle__icon" aria-hidden="true"></span>
+            </button>
+            <div id="drift-table-collapse" class="collapsible-panel">
+              <div class="collapsible-panel__inner">
+                <div id="drift-table" class="table-shell table-shell--scroll"></div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="panel-card">
+          <div class="panel-head">
+            <div>
+              <span class="panel-kicker">Adaptive Logic</span>
+              <h2>Adaptive Threshold</h2>
+            </div>
+          </div>
+          <div class="stats-row stats-row--three">
+            <div class="mini-metric"><span>Threshold</span><strong id="adaptive-threshold">0.450</strong></div>
+            <div class="mini-metric"><span>Precision</span><strong id="adaptive-precision">0.000</strong></div>
+            <div class="mini-metric"><span>Recall</span><strong id="adaptive-recall">0.000</strong></div>
+          </div>
+        </article>
+      </div>
+
+      <div class="dashboard-grid dashboard-grid--analysis">
+        <article class="panel-card">
+          <div class="panel-head">
+            <div>
+              <span class="panel-kicker">Rules</span>
+              <h2>Rule-Based Risk Scoring</h2>
+            </div>
+          </div>
+          <div class="stats-row stats-row--three">
+            <div class="mini-metric danger"><span>High</span><strong id="rule-high">0</strong></div>
+            <div class="mini-metric warning"><span>Medium</span><strong id="rule-medium">0</strong></div>
+            <div class="mini-metric"><span>Scored</span><strong id="rule-scored">0</strong></div>
+          </div>
+          <div class="subpanel-card">
+            <button class="collapse-toggle" type="button" data-collapsible-trigger="rule-table-collapse" aria-expanded="false">
+              <span class="collapse-toggle__text">
+                <strong>Rule Score Table</strong>
+                <small>Expand to inspect scored accounts and rule explanations.</small>
+              </span>
+              <span class="collapse-toggle__meta">Show</span>
+              <span class="collapse-toggle__icon" aria-hidden="true"></span>
+            </button>
+            <div id="rule-table-collapse" class="collapsible-panel">
+              <div class="collapsible-panel__inner">
+                <div id="rule-table" class="table-shell table-shell--scroll"></div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="panel-card">
+          <div class="panel-head">
+            <div>
+              <span class="panel-kicker">Model</span>
+              <h2>ML Detection Results</h2>
+            </div>
+            <div class="stat-chip" id="gnn-chip">GNN Pending</div>
+          </div>
+          <div class="stats-row stats-row--three">
+            <div class="mini-metric"><span>Fraud Flagged</span><strong id="ml-flagged">0</strong></div>
+            <div class="mini-metric"><span>Precision</span><strong id="ml-precision">0.000</strong></div>
+            <div class="mini-metric"><span>Recall</span><strong id="ml-recall">0.000</strong></div>
+          </div>
+          <div class="subpanel-card">
+            <button class="collapse-toggle" type="button" data-collapsible-trigger="ml-table-collapse" aria-expanded="false">
+              <span class="collapse-toggle__text">
+                <strong>Detected Account Table</strong>
+                <small>Expand to inspect ML, rule, and GNN results together.</small>
+              </span>
+              <span class="collapse-toggle__meta">Show</span>
+              <span class="collapse-toggle__icon" aria-hidden="true"></span>
+            </button>
+            <div id="ml-table-collapse" class="collapsible-panel">
+              <div class="collapsible-panel__inner">
+                <div id="ml-table" class="table-shell table-shell--scroll"></div>
+              </div>
+            </div>
+          </div>
+        </article>
+      </div>
+
+      <div class="dashboard-grid dashboard-grid--workspace">
+        <article class="panel-card panel-card--investigation">
+          <div class="panel-head">
+            <div>
+              <span class="panel-kicker">Fraud Analyst</span>
+              <h2>Fraud Investigation Panel</h2>
+            </div>
+          </div>
+          <div class="select-shell">
+            <select id="investigation-select"></select>
+          </div>
+          <div class="stats-row stats-row--three">
+            <div class="mini-metric"><span>Account ID</span><strong id="investigation-account">--</strong></div>
+            <div class="mini-metric"><span>Fraud Score</span><strong id="investigation-score">0%</strong></div>
+            <div class="mini-metric"><span>Confidence</span><strong id="investigation-confidence">--</strong></div>
+          </div>
+          <div class="stats-row stats-row--three">
+            <div class="mini-metric"><span>ML</span><strong id="investigation-ml">--</strong></div>
+            <div class="mini-metric"><span>Rule</span><strong id="investigation-rule">--</strong></div>
+            <div class="mini-metric"><span>GNN</span><strong id="investigation-gnn">--</strong></div>
+          </div>
+          <div id="investigation-alert" class="investigation-alert">No fraud accounts detected.</div>
+          <div class="dashboard-grid dashboard-grid--investigation-inner">
+            <div>
+              <h3 class="subsection-title">Fraud Role</h3>
+              <p id="investigation-role" class="section-message">No role assigned.</p>
+              <div class="chart-shell chart-shell--medium"><canvas id="role-chart"></canvas></div>
+            </div>
+            <div>
+              <h3 class="subsection-title">SHAP Risk Breakdown</h3>
+              <div class="chart-shell chart-shell--medium"><canvas id="shap-chart"></canvas></div>
+              <div class="subpanel-card subpanel-card--spaced">
+                <button class="collapse-toggle" type="button" data-collapsible-trigger="shap-table-collapse" aria-expanded="false">
+                  <span class="collapse-toggle__text">
+                    <strong>Risk Category Table</strong>
+                    <small>Expand to inspect SHAP category contributions.</small>
+                  </span>
+                  <span class="collapse-toggle__meta">Show</span>
+                  <span class="collapse-toggle__icon" aria-hidden="true"></span>
+                </button>
+                <div id="shap-table-collapse" class="collapsible-panel">
+                  <div class="collapsible-panel__inner">
+                    <div id="shap-table" class="table-shell table-shell--scroll"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="subpanel-card subpanel-card--spaced">
+            <h3 class="subsection-title">Why Flagged?</h3>
+            <ul id="shap-explanations" class="explanation-list"></ul>
+          </div>
+        </article>
+
+        <div class="workspace-stack">
+          <article class="panel-card">
+            <div class="panel-head">
+              <div>
+                <span class="panel-kicker">Memory</span>
+                <h2>Fraud Pattern Memory</h2>
+              </div>
+            </div>
+            <div class="stats-row stats-row--two">
+              <div class="mini-metric"><span>Pattern Similarity</span><strong id="pattern-similarity">0%</strong></div>
+              <div class="mini-metric"><span>Patterns Stored</span><strong id="pattern-stored">0</strong></div>
+            </div>
+            <p id="pattern-message" class="section-message"></p>
+          </article>
+
+          <article class="panel-card">
+            <div class="panel-head">
+              <div>
+                <span class="panel-kicker">Outcome</span>
+                <h2>Detection Summary</h2>
+              </div>
+            </div>
+            <p id="detection-pattern" class="section-message">Detected Pattern: Unknown</p>
+            <div class="stats-row stats-row--three">
+              <div class="mini-metric"><span>Injected</span><strong id="summary-injected">0</strong></div>
+              <div class="mini-metric"><span>Detected</span><strong id="summary-detected">0</strong></div>
+              <div class="mini-metric"><span>Missed</span><strong id="summary-missed">0</strong></div>
+            </div>
+          </article>
+
+          <article class="panel-card">
+            <div class="panel-head">
+              <div>
+                <span class="panel-kicker">Cross-Check</span>
+                <h2>Early Detection Cross-Check</h2>
+              </div>
+            </div>
+            <div class="stats-row stats-row--three">
+              <div class="mini-metric"><span>Before Attack</span><strong id="cross-early">0</strong></div>
+              <div class="mini-metric"><span>Matched</span><strong id="cross-matched">0</strong></div>
+              <div class="mini-metric"><span>Sleeper</span><strong id="cross-sleeper">0</strong></div>
+            </div>
+            <div class="subpanel-card">
+              <button class="collapse-toggle" type="button" data-collapsible-trigger="cross-check-collapse" aria-expanded="false">
+                <span class="collapse-toggle__text">
+                  <strong>Account Match Lists</strong>
+                  <small>Expand to inspect matched, sleeper, and false-positive accounts.</small>
+                </span>
+                <span class="collapse-toggle__meta">Show</span>
+                <span class="collapse-toggle__icon" aria-hidden="true"></span>
+              </button>
+              <div id="cross-check-collapse" class="collapsible-panel">
+                <div class="collapsible-panel__inner">
+                  <div id="cross-check-list" class="structured-list"></div>
+                </div>
+              </div>
+            </div>
+          </article>
+        </div>
+      </div>
+
+      <article class="panel-card">
+        <div class="panel-head">
+          <div>
+            <span class="panel-kicker">System Intelligence</span>
+            <h2>Dashboard History</h2>
+          </div>
+        </div>
+        <div class="dashboard-grid dashboard-grid--history">
+          <div class="chart-shell chart-shell--history"><canvas id="threshold-chart"></canvas></div>
+          <div class="chart-shell chart-shell--history"><canvas id="fraud-history-chart"></canvas></div>
+          <div class="chart-shell chart-shell--history"><canvas id="role-history-chart"></canvas></div>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <audio id="alarm-audio" preload="auto"></audio>
+
+  <script src="/app.js"></script>
+</body>
+</html>
