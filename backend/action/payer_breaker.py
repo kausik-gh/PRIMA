@@ -244,6 +244,7 @@ async def apply_contact_ack(*, token: str, action: str) -> dict[str, Any]:
 
         if pay_topic and pay_event and pay_data is not None:
             await hub.broadcast(pay_topic, envelope(pay_event, pay_data))
+            await hub.broadcast("console", envelope(pay_event, pay_data))
 
         # Keep isolation BREAKER_LOG in sync; broadcast acked if memory has no row.
         try:

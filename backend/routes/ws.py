@@ -15,6 +15,7 @@ from backend.action import circuit_breaker as cb
 from backend.action import scoped_hold as sh
 from backend.core.db import engine
 from backend.core.models import CircuitBreakerLog, ScopedHold, TrustedContact
+from backend.routes.console_queries import console_snapshot, pay_snapshot
 from sqlmodel import Session, select
 
 router = APIRouter()
@@ -63,6 +64,10 @@ hub = TopicHub()
 
 def envelope(event_type: str, data: dict) -> dict:
     return {"type": event_type, "ts": cb.utc_now(), "data": data}
+
+
+async def broadcast_console(event_type: str, data: dict) -> None:
+    await hub.broadcast("console", envelope(event_type, data))
 
 
 def _http_error(status: int, code: str, message: str) -> JSONResponse:
@@ -146,16 +151,36 @@ async def watch_socket(ws: WebSocket, token: str) -> None:
         await hub.disconnect(topic, ws)
 
 
+@router.websocket("/ws/console")
+async def console_socket(ws: WebSocket) -> None:
+    topic = "console"
+    await hub.connect(topic, ws)
+    try:
+        with Session(engine) as db:
+            snap = console_snapshot(db)
+        await ws.send_json(envelope("snapshot", snap))
+        while True:
+            await ws.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await hub.disconnect(topic, ws)
+
+
 @router.websocket("/ws/pay/{account_id}")
 async def pay_socket(ws: WebSocket, account_id: str) -> None:
-    if sh.get_account(account_id) is None:
+    with Session(engine) as db:
+        sql_view = pay_snapshot(db, account_id)
+    isolation = sh.get_account(account_id)
+    if sql_view is None and isolation is None:
         await ws.accept()
         await ws.close(code=4404)
         return
+    snapshot = sql_view if sql_view is not None else sh.account_view(account_id)
     topic = f"pay:{account_id}"
     await hub.connect(topic, ws)
     try:
-        await ws.send_json(envelope("snapshot", sh.account_view(account_id)))
+        await ws.send_json(envelope("snapshot", snapshot))
         while True:
             await ws.receive_text()
     except WebSocketDisconnect:

@@ -40,6 +40,12 @@ from backend.core.models import (
     Transaction,
     utc_now,
 )
+from backend.routes.console_queries import (
+    decision_item,
+    graph_link_for_tx,
+    graph_node,
+    ps3_metrics,
+)
 from backend.routes.ws import envelope, hub
 
 router = APIRouter(prefix="/api/payer", tags=["payer"])
@@ -111,7 +117,7 @@ class CancelBody(BaseModel):
 
 
 @router.post("/quote")
-def quote(body: QuoteBody, session: Session = Depends(get_session)):
+async def quote(body: QuoteBody, session: Session = Depends(get_session)):
     if isinstance(body.amount_paise, bool) or not isinstance(body.amount_paise, int):
         return _error(400, "bad_amount", "amount_paise must be integer paise.")
     if body.amount_paise <= 0:
@@ -199,6 +205,9 @@ def quote(body: QuoteBody, session: Session = Depends(get_session)):
         }
 
     session.commit()
+    await hub.broadcast("console", envelope("decision.created", decision_item(session, row)))
+    await hub.broadcast("console", envelope("graph.link_added", graph_link_for_tx(session, tx)))
+    await hub.broadcast("console", envelope("metrics.updated", ps3_metrics(session)))
     return {
         "decision_id": decision_id,
         "verdict": row.verdict,
@@ -257,6 +266,13 @@ async def commit(body: CommitBody, session: Session = Depends(get_session)):
         session.add(tx)
         session.add(decision)
         session.commit()
+        await hub.broadcast(
+            "console", envelope("decision.committed", decision_item(session, decision))
+        )
+        node = graph_node(session, sender.id)
+        if node is not None:
+            await hub.broadcast("console", envelope("graph.node_updated", node))
+        await hub.broadcast("console", envelope("metrics.updated", ps3_metrics(session)))
         return {"outcome": "settled"}
 
     immediate = IMMEDIATE_PAISE
@@ -285,24 +301,27 @@ async def commit(body: CommitBody, session: Session = Depends(get_session)):
     session.add(decision)
     session.commit()
 
+    hold_payload = {
+        "id": hold.id,
+        "transaction_id": hold.transaction_id,
+        "account_id": hold.account_id,
+        "held_paise": hold.held_paise,
+        "reason_ref": hold.reason_ref,
+        "opened_at": iso(hold.opened_at),
+        "releases_at": iso(releases_at),
+        "released_at": None,
+        "outcome": None,
+        "available_paise": available_paise(session, sender),
+    }
+    await hub.broadcast(f"pay:{sender.id}", envelope("hold.opened", hold_payload))
+    await hub.broadcast("console", envelope("hold.opened", hold_payload))
     await hub.broadcast(
-        f"pay:{sender.id}",
-        envelope(
-            "hold.opened",
-            {
-                "id": hold.id,
-                "transaction_id": hold.transaction_id,
-                "account_id": hold.account_id,
-                "held_paise": hold.held_paise,
-                "reason_ref": hold.reason_ref,
-                "opened_at": iso(hold.opened_at),
-                "releases_at": iso(releases_at),
-                "released_at": None,
-                "outcome": None,
-                "available_paise": available_paise(session, sender),
-            },
-        ),
+        "console", envelope("decision.committed", decision_item(session, decision))
     )
+    node = graph_node(session, sender.id)
+    if node is not None:
+        await hub.broadcast("console", envelope("graph.node_updated", node))
+    await hub.broadcast("console", envelope("metrics.updated", ps3_metrics(session)))
 
     contact_note = None
     if decision.tier == 4:
@@ -352,27 +371,24 @@ async def cancel(body: CancelBody, session: Session = Depends(get_session)):
         session.add(hold)
         acct = session.get(Account, hold.account_id)
         available = available_paise(session, acct) if acct is not None else 0
-        await hub.broadcast(
-            f"pay:{hold.account_id}",
-            envelope(
-                "hold.released",
-                {
-                    "id": hold.id,
-                    "transaction_id": hold.transaction_id,
-                    "account_id": hold.account_id,
-                    "held_paise": hold.held_paise,
-                    "reason_ref": hold.reason_ref,
-                    "opened_at": iso(hold.opened_at),
-                    "releases_at": iso(hold.releases_at) if hold.releases_at else None,
-                    "released_at": iso(now),
-                    "outcome": "cancelled_by_user",
-                    "available_paise": available,
-                },
-            ),
-        )
+        released = {
+            "id": hold.id,
+            "transaction_id": hold.transaction_id,
+            "account_id": hold.account_id,
+            "held_paise": hold.held_paise,
+            "reason_ref": hold.reason_ref,
+            "opened_at": iso(hold.opened_at),
+            "releases_at": iso(hold.releases_at) if hold.releases_at else None,
+            "released_at": iso(now),
+            "outcome": "cancelled_by_user",
+            "available_paise": available,
+        }
+        await hub.broadcast(f"pay:{hold.account_id}", envelope("hold.released", released))
+        await hub.broadcast("console", envelope("hold.released", released))
     tx.status = "cancelled"
     session.add(tx)
     session.commit()
+    await hub.broadcast("console", envelope("metrics.updated", ps3_metrics(session)))
     return {"outcome": "cancelled_by_user"}
 
 

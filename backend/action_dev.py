@@ -26,6 +26,7 @@ from backend.action.reasonline import (
     verify_regulator_record,
 )
 from backend.core.db import create_db_and_tables
+from backend.routes.console import router as console_router
 from backend.routes.payer import router as payer_router
 from backend.routes.ws import harness_router, router as ws_router
 # K's real backend.api should include_router(payer_router) the same way.
@@ -77,6 +78,7 @@ app.add_middleware(
 app.include_router(ws_router)
 app.include_router(harness_router)
 app.include_router(payer_router)
+app.include_router(console_router)
 
 
 @app.exception_handler(RequestValidationError)
