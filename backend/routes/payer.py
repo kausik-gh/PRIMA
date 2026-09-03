@@ -399,6 +399,9 @@ def account(handle: str, session: Session = Depends(get_session)):
         return _error(404, "unknown_handle", "No account with that handle in the demo ledger.")
     holds = active_hold_rows(session, acct.id)
     return {
+        "account_id": acct.id,
+        "handle": acct.handle,
+        "display_name": acct.display_name,
         "balance_paise": acct.balance_paise,
         "available_paise": available_paise(session, acct),
         "active_holds": [

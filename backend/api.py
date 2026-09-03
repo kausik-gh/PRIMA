@@ -7,10 +7,12 @@ Do not start RealTimeEngine. Do not load CUDA paths.
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from backend.action.reasonline import (
@@ -97,3 +99,28 @@ def reason_demo():
         "payload_sha256": record["sha256_of_payload"],
         "verified": True,
     }
+
+
+def _mount_web(app: FastAPI) -> None:
+    """Serve the built React app from web/dist when present."""
+    dist = Path(__file__).resolve().parents[1] / "web" / "dist"
+    if not dist.is_dir():
+        return
+    assets = dist / "assets"
+    if assets.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(assets)), name="web-assets")
+
+    @app.get("/{full_path:path}")
+    def spa_fallback(full_path: str):
+        if full_path.startswith("api/") or full_path.startswith("ws/"):
+            return JSONResponse(
+                status_code=404,
+                content={"error": {"code": "not_found", "message": "No such route."}},
+            )
+        candidate = dist / full_path
+        if candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(dist / "index.html")
+
+
+_mount_web(app)

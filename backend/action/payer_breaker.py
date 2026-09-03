@@ -89,7 +89,12 @@ async def maybe_fire_for_tier4(
     now: datetime,
     hold_id: str | None = None,
 ) -> str | None:
-    """Fire watch alert when a trusted contact exists. Returns note if skipped."""
+    """Fire watch alert when a trusted contact exists.
+
+    Always returns a note describing what happened — "fired" on success,
+    a skip reason otherwise — so the commit response confirms the outcome
+    either way instead of only ever reporting the failure case.
+    """
     contact = trusted_contact(session, sender.id)
     if contact is None:
         return "no_trusted_contact"
@@ -134,7 +139,7 @@ async def maybe_fire_for_tier4(
         )
     )
     session.commit()
-    return None
+    return "fired"
 
 
 async def apply_contact_ack(*, token: str, action: str) -> dict[str, Any]:
