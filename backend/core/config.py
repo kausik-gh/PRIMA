@@ -39,11 +39,15 @@ def get_config() -> dict[str, Any]:
         raw.setdefault("database", {})["url"] = env_url
 
     # LAN demo origin, never a wildcard.
+    origins = raw.setdefault("cors", {}).setdefault("allow_origins", [])
     lan_origin = os.environ.get("PRIMA_LAN_ORIGIN")
-    if lan_origin:
-        origins = raw.setdefault("cors", {}).setdefault("allow_origins", [])
-        if lan_origin not in origins:
-            origins.append(lan_origin)
+    if lan_origin and lan_origin != "*" and lan_origin not in origins:
+        origins.append(lan_origin)
+    extra = os.environ.get("PRIMA_CORS_ORIGINS", "")
+    for item in extra.split(","):
+        origin = item.strip()
+        if origin and origin != "*" and origin not in origins:
+            origins.append(origin)
 
     return raw
 

@@ -61,6 +61,8 @@ class Transaction(SQLModel, table=True):
     channel: str = Field(nullable=False)
     note: Optional[str] = Field(default=None)
     # Allowed: 'quoted' | 'settled' | 'held' | 'cancelled' | 'challenged'.
+    # Tier 3/4 commit -> held. Contact approved or cooling timeout -> settled.
+    # Payer cancel -> cancelled. Contact extend keeps held.
     status: str = Field(nullable=False)
     attempted_at: datetime = Field(
         sa_column=Column(DateTime(timezone=True), nullable=False),
@@ -212,6 +214,10 @@ class ScopedHold(SQLModel, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
+    # released = remainder settled (approve or timeout).
+    # cancelled_by_user = payer cancel, no remainder debit.
+    # null while still held, including contact extend.
+    # escalated = bank/ops only, not contact "hold it".
     outcome: Optional[str] = Field(default=None)
 
 

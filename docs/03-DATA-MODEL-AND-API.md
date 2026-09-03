@@ -33,6 +33,8 @@ create table transactions (
   channel         text not null,                 -- 'upi'|'imps'|'neft'|'card'
   note            text,                          -- ContextFlag reads this
   status          text not null,                 -- 'quoted'|'settled'|'held'|'cancelled'|'challenged'
+                                                 -- tier 3/4 commit -> held; contact approved or cooling
+                                                 -- timeout -> settled; payer cancel -> cancelled
   attempted_at    timestamp not null,
   settled_at      timestamp,
   taint_ratio     real not null default 0.0,
@@ -108,6 +110,10 @@ create table scoped_holds (
   releases_at      timestamp,           -- cooling window end
   released_at      timestamp,
   outcome          text                 -- 'released'|'cancelled_by_user'|'escalated'
+                                        -- released = remainder settled (approve or timeout)
+                                        -- cancelled_by_user = payer cancel, no remainder debit
+                                        -- null while still held (including contact extend)
+                                        -- escalated = bank/ops only, not contact "hold it"
 );
 
 create table trusted_contacts (
@@ -227,6 +233,18 @@ GET  /api/payer/account/{handle}
 → 200 { balance_paise, available_paise, active_holds:[{reason_ref, held_paise, releases_at}] }
 ```
 
+CircuitBreaker ack on `/ws/watch/{token}` (`ack_action` `approved` | `hold`):
+
+| Path | hold.outcome | transactions.status | Ledger |
+|---|---|---|---|
+| contact `approved` | `released` | `settled` | Debit sender `held_paise`, credit receiver, then clear the hold. Immediate ₹1 already moved at commit. |
+| contact `hold` (extend) | stay `null` | stay `held` | No ledger change. Push `releases_at`. Emit `hold.extended` on `/ws/pay/{account_id}`. |
+| payer cancel | `cancelled_by_user` | `cancelled` | Clear hold only. Do not debit the remainder. |
+| cooling timeout | `released` | `settled` | Same money movement as `approved`. |
+
+Isolation `release_hold` that only restores availability is the **cancel** path, not approve. Approve is not "un-hold and leave the remainder unsent."
+Do not use `escalated` for contact "hold it".
+
 ### Console surface
 
 ```http
@@ -283,14 +301,14 @@ GET  /api/ops/health
 ```
 /ws/console          → typed events, console only
 /ws/watch/{token}    → circuit-breaker channel for one trusted contact
-/ws/pay/{account_id} → payer's own hold status updates (countdown, release)
+/ws/pay/{account_id} → payer hold updates: opened, extended, released
 ```
 
 Event envelope, used on all three:
 
 ```json
 { "type": "decision.created" | "decision.committed" | "graph.node_updated"
-        | "graph.link_added" | "hold.opened" | "hold.released"
+        | "graph.link_added" | "hold.opened" | "hold.extended" | "hold.released"
         | "circuit_breaker.fired" | "circuit_breaker.acked" | "metrics.updated",
   "ts": "2026-09-03T15:41:02.118Z",
   "data": { … } }
