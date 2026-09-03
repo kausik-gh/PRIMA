@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -15,7 +16,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from backend.action import circuit_breaker as cb
+from backend.action.payer_seed import ensure_payer_seed
+from backend.action.reasonline import (
+    assert_user_reason_safe,
+    bank,
+    load_fixture,
+    regulator,
+    user,
+    verify_regulator_record,
+)
+from backend.core.db import create_db_and_tables
+from backend.routes.payer import router as payer_router
 from backend.routes.ws import harness_router, router as ws_router
+# K's real backend.api should include_router(payer_router) the same way.
 
 HARNESS_PATH = Path(__file__).resolve().parent / "action" / "watch_harness.html"
 HOLD_HARNESS_PATH = Path(__file__).resolve().parent / "action" / "hold_harness.html"
@@ -40,7 +53,20 @@ def _cors_origins() -> list[str]:
     return unique
 
 
-app = FastAPI(title="PRIMA CircuitBreaker isolation", docs_url=None, redoc_url=None)
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    create_db_and_tables()
+    # Ops will own seeding later; this keeps quote/commit demoable without /api/ops/seed.
+    ensure_payer_seed()
+    yield
+
+
+app = FastAPI(
+    title="PRIMA CircuitBreaker isolation",
+    docs_url=None,
+    redoc_url=None,
+    lifespan=lifespan,
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),
@@ -50,6 +76,7 @@ app.add_middleware(
 )
 app.include_router(ws_router)
 app.include_router(harness_router)
+app.include_router(payer_router)
 
 
 @app.exception_handler(RequestValidationError)
@@ -99,3 +126,31 @@ def hold_page() -> HTMLResponse:
         }
     )
     return HTMLResponse(html.replace("__BOOT_JSON__", boot))
+
+
+@app.get("/api/reason/demo")
+def reason_demo():
+    decision = load_fixture()
+    user_reason = user(decision)
+    assert_user_reason_safe(user_reason)
+    bank_reason = bank(decision)
+    record = regulator(decision)
+    if not verify_regulator_record(record):
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": {
+                    "code": "regulator_hash_mismatch",
+                    "message": "Regulator payload hash did not verify.",
+                }
+            },
+        )
+    return {
+        "decision_id": decision["id"],
+        "tier": decision["tier"],
+        "user_reason": user_reason,
+        "bank_reason": bank_reason,
+        "regulator_record": record,
+        "payload_sha256": record["sha256_of_payload"],
+        "verified": True,
+    }
