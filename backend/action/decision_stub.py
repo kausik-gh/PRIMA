@@ -35,25 +35,55 @@ def _try_real_evaluate(
     *,
     meta: dict[str, Any],
 ) -> dict[str, Any] | None:
+    """Score via RingWatch + TrailScore + ContextFlag. Does not persist a quote.
+
+    Payer routes still write the RiskDecision row. fusion.py/ladder.py are not
+    required; DecisionService fallbacks in backend.core.decision are enough.
+    """
     try:
-        from backend.scoring import fusion, ladder  # type: ignore
+        from sqlmodel import Session
+
+        from backend.core.config import get_config
+        from backend.core.db import engine
+        from backend.core.decision import _verdict_from_fused, fuse, ladder_tier
+        from backend.graph.pathgraph import get_graph, rebuild_from_db
+        from backend.scoring.contextflag import contextflag_score
+        from backend.scoring.ringwatch import ringwatch_score
+        from backend.scoring.trailscore import trailscore_score
     except Exception:
         return None
-    # Real path reserved for when P2 modules land; keep signature stable.
-    ring = float(getattr(fusion, "ringwatch_score", lambda *_a, **_k: 0.0)(sender, beneficiary))
-    trail = float(getattr(fusion, "trailscore_score", lambda *_a, **_k: 0.0)(sender))
-    ctx = float(getattr(fusion, "contextflag_score", lambda *_a, **_k: 0.0)(note or ""))
-    fused, bonus, rules = fusion.fuse(ring, trail, ctx)  # type: ignore[attr-defined]
-    tier, verdict, _action = ladder.tier(fused)  # type: ignore[attr-defined]
+
+    cfg = get_config()
+    with Session(engine) as session:
+        graph = get_graph()
+        has_accounts = any(
+            data.get("node_type") == "account" for _, data in graph.nodes(data=True)
+        )
+        if not has_accounts:
+            rebuild_from_db(session)
+
+        ring = ringwatch_score(beneficiary.id, session)
+        trail, trail_rules = trailscore_score(sender.id, amount_paise, session)
+        ctx, ctx_rules = contextflag_score(note, sender.id, session)
+        fused, bonus = fuse(ring.score, trail, ctx, cfg)
+        fused = max(0.0, min(1.0, fused))
+        tier, _action = ladder_tier(fused, cfg)
+        if int(meta.get("prior_payments_to_beneficiary") or 0) >= 1:
+            verdict = "known"
+            tier = 0
+        else:
+            verdict = _verdict_from_fused(fused)
+        rules = list(ring.rules_fired) + list(trail_rules) + list(ctx_rules)
+
     return {
-        "ringwatch_score": ring,
-        "trailscore_score": trail,
-        "contextflag_score": ctx,
+        "ringwatch_score": float(ring.score),
+        "trailscore_score": float(trail),
+        "contextflag_score": float(ctx),
         "cross_term_bonus": float(bonus or 0),
         "fused_score": float(fused),
         "tier": int(tier),
         "verdict": str(verdict),
-        "rules_fired": list(rules or []),
+        "rules_fired": rules,
         "meta": meta,
     }
 
