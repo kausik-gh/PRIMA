@@ -1,3 +1,4 @@
+from backend.memory.adaptcal import AdaptCal, AdaptCalSnapshot
 from backend.memory.pattern_memory import (
     PatternMemory,
     PatternSignature,
@@ -7,6 +8,8 @@ from backend.memory.pattern_memory import (
 )
 
 __all__ = [
+    "AdaptCal",
+    "AdaptCalSnapshot",
     "PatternMemory",
     "PatternSignature",
     "compare_signature",
