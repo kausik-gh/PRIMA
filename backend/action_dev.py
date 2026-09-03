@@ -15,6 +15,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from backend.action import circuit_breaker as cb
+from backend.action.reasonline import (
+    assert_user_reason_safe,
+    bank,
+    load_fixture,
+    regulator,
+    user,
+    verify_regulator_record,
+)
 from backend.routes.ws import harness_router, router as ws_router
 
 HARNESS_PATH = Path(__file__).resolve().parent / "action" / "watch_harness.html"
@@ -99,3 +107,31 @@ def hold_page() -> HTMLResponse:
         }
     )
     return HTMLResponse(html.replace("__BOOT_JSON__", boot))
+
+
+@app.get("/api/reason/demo")
+def reason_demo():
+    decision = load_fixture()
+    user_reason = user(decision)
+    assert_user_reason_safe(user_reason)
+    bank_reason = bank(decision)
+    record = regulator(decision)
+    if not verify_regulator_record(record):
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": {
+                    "code": "regulator_hash_mismatch",
+                    "message": "Regulator payload hash did not verify.",
+                }
+            },
+        )
+    return {
+        "decision_id": decision["id"],
+        "tier": decision["tier"],
+        "user_reason": user_reason,
+        "bank_reason": bank_reason,
+        "regulator_record": record,
+        "payload_sha256": record["sha256_of_payload"],
+        "verified": True,
+    }
