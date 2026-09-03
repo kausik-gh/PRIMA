@@ -1,0 +1,61 @@
+version: "1.0.0"
+
+ledger:
+  seed_accounts: 500
+  seed_days: 21
+  default_guest_balance_paise: 50000000     # ₹5,00,000 demo balance
+
+fusion:
+  ringwatch_weight: 0.40
+  trailscore_weight: 0.35
+  contextflag_weight: 0.25
+  cross_term: { enabled: true, trail_min: 0.45, ring_max: 0.30, bonus: 0.15 }
+
+ringwatch:
+  rule_points: { fan_in: 2, fan_out: 2, pass_through: 2, shared_device: 3,
+                 channel_burst: 2, high_velocity: 1, dormant_wake: 2, fresh_fan_in: 3 }
+  rule_score_divisor: 12.0
+  gnn_weight: 0.45
+  taint_gate: { min_ratio: 0.15, below_gate_multiplier: 0.35 }
+
+trailscore:
+  window_minutes: 15
+  weights: { login_new_device: 0.20, credential_changed: 0.22, payee_added: 0.15,
+             limit_raised: 0.20, full_balance_amount: 0.20, screen_share_active: 0.25 }
+  ordered_bonus: 0.25
+  unordered_bonus: 0.10
+
+contextflag:
+  weights: { urgency: 0.25, secrecy: 0.30, fear: 0.30, greed: 0.15, bypass_approval: 0.30 }
+  lexicon_module: "backend.context.lexicon"    # phrases live in code only
+
+ladder:
+  - { tier: 0, max: 0.15, action: pass_silent }
+  - { tier: 1, max: 0.40, action: inline_reason }
+  - { tier: 2, max: 0.60, action: purpose_challenge }
+  - { tier: 3, max: 0.80, action: scoped_hold_cooling }
+  - { tier: 4, max: 1.01, action: scoped_hold_plus_circuit_breaker }
+
+scoped_hold:
+  immediate_paise: 100                # the ₹1 that still sends
+  cooling_minutes: 30
+  reason_ref_prefix: "PRIMA-2026-"
+
+adaptcal:
+  enabled: false                      # P1
+  step: 0.02
+  target: "false_challenge_rate"
+
+server:
+  host: "0.0.0.0"
+  port: 8088
+
+cors:
+  allow_origins:
+    - "http://localhost:5173"
+    - "http://127.0.0.1:5173"
+    - "http://localhost:8088"
+    - "http://127.0.0.1:8088"
+
+database:
+  url: "sqlite:///./prima.db"
