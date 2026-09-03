@@ -42,13 +42,15 @@ NAMED_HANDLES = [
     "merchant.ok@prima",
 ]
 
-# Extra labelled mule structures so the later PS3 denominator is > 1.
+# Extra labelled collection/ring structures so the later PS3 denominator is > 1.
 EXTRA_MULE_HANDLES = [
     "cashpool@prima",
     "neel.m@prima",
     "tara.m@prima",
     "om.m@prima",
 ]
+
+DORMANT_HANDLE = "dormant.wake@prima"
 
 BANK_CODES = ("BANKA", "BANKA", "BANKA", "BANKA", "BANKA", "BANKA", "BANKA", "BANKB", "BANKC")
 
@@ -215,7 +217,7 @@ def seed_database(accounts: int = 500, days: int = 21, *, reset: bool = True) ->
     if accounts < 20:
         raise ValueError("seed_database requires at least 20 accounts")
 
-    reserved = set(NAMED_HANDLES) | set(EXTRA_MULE_HANDLES)
+    reserved = set(NAMED_HANDLES) | set(EXTRA_MULE_HANDLES) | {DORMANT_HANDLE}
     regular_count = accounts - len(reserved)
     regular_handles = _build_regular_handles(regular_count, reserved)
 
@@ -303,6 +305,14 @@ def seed_database(accounts: int = 500, days: int = 21, *, reset: bool = True) ->
         balance_paise=random.randint(8_000_00, 20_000_00),
         device_id=ring_device,
         ground_truth_role="mule",
+    )
+    by_handle[DORMANT_HANDLE] = _make_account(
+        DORMANT_HANDLE,
+        "Dormant Wake",
+        created_at=_utc(seed_now, days=400),
+        balance_paise=random.randint(20_000_00, 5_00_000_00),
+        device_id="dev-dormant-wake-own",
+        ground_truth_role=None,
     )
 
     window_start = seed_now - timedelta(days=days)
@@ -459,6 +469,27 @@ def seed_database(accounts: int = 500, days: int = 21, *, reset: bool = True) ->
                 note="household",
                 is_seeded_attack=True,
             )
+
+    # Quiet old activity, then one recent inbound after a long gap.
+    dormant = by_handle[DORMANT_HANDLE]
+    dormant_priors = regular_accounts[40:45]
+    prior_amount = 50_000
+    prior_offsets = (100, 90, 80, 70, 45)
+    for i, sender in enumerate(dormant_priors):
+        add_tx(
+            sender,
+            dormant,
+            prior_amount,
+            seed_now - timedelta(days=prior_offsets[i]),
+            note="salary",
+        )
+    add_tx(
+        regular_accounts[45],
+        dormant,
+        prior_amount * 6,
+        seed_now - timedelta(hours=2),
+        note="salary",
+    )
 
     # Sparse events so TrailScore has material later -- not a firehose.
     for i, acct in enumerate(regular_accounts[:40]):
