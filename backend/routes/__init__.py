@@ -1,1 +1,1 @@
-"""PRIMA HTTP/WebSocket routers (payer, console, watch)."""
+"""PRIMA HTTP/WebSocket routers (payer, console, ops, watch)."""

@@ -67,15 +67,36 @@ def ensure_payer_seed() -> None:
         _sync_watch_session(session, ramesh)
 
 
-def _sync_watch_session(session: Session, ramesh: Account) -> None:
-    contact = session.exec(
-        select(TrustedContact).where(TrustedContact.account_id == ramesh.id)
-    ).first()
-    if contact is None:
+def sync_watch_sessions(session: Session, account: Account | None = None) -> None:
+    """Mirror TrustedContact rows into CircuitBreaker SESSIONS so /ws/watch works."""
+    if account is not None:
+        contacts = session.exec(
+            select(TrustedContact).where(TrustedContact.account_id == account.id)
+        ).all()
+        for contact in contacts:
+            cb.SESSIONS[contact.watch_token] = {
+                "token": contact.watch_token,
+                "account_holder": account.display_name,
+                "contact_name": contact.contact_name,
+                "account_id": account.id,
+            }
         return
-    cb.SESSIONS[contact.watch_token] = {
-        "token": contact.watch_token,
-        "account_holder": ramesh.display_name,
-        "contact_name": contact.contact_name,
-        "account_id": ramesh.id,
-    }
+    keep: set[str] = set()
+    for contact in session.exec(select(TrustedContact)).all():
+        holder_acct = session.get(Account, contact.account_id)
+        if holder_acct is None:
+            continue
+        cb.SESSIONS[contact.watch_token] = {
+            "token": contact.watch_token,
+            "account_holder": holder_acct.display_name,
+            "contact_name": contact.contact_name,
+            "account_id": holder_acct.id,
+        }
+        keep.add(contact.watch_token)
+    for token in list(cb.SESSIONS):
+        if token not in keep:
+            cb.SESSIONS.pop(token, None)
+
+
+def _sync_watch_session(session: Session, ramesh: Account) -> None:
+    sync_watch_sessions(session, ramesh)
