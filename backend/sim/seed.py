@@ -607,5 +607,13 @@ def seed_database(accounts: int = 500, days: int = 21, *, reset: bool = True) ->
     }
 
 
+def wipe_database() -> None:
+    """Clear all SQLModel tables. Ops reset uses this, then re-seeds."""
+    create_db_and_tables()
+    with Session(engine) as session:
+        _wipe_all(session)
+        session.commit()
+
+
 if __name__ == "__main__":
     print(json.dumps(seed_database()))

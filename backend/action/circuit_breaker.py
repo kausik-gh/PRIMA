@@ -146,7 +146,7 @@ async def fire(hub: Hub, token: str, payload: dict) -> str:
 
 
 async def ack(hub: Hub, token: str, action: str) -> dict:
-    # Hold extend/release on contact ack lands when payer commit wires ScopedHold (later phase).
+    # SQL ScopedHold extend/release is applied by payer_breaker.apply_contact_ack.
     if action not in ("approved", "hold"):
         raise ValueError("bad_action")
     session = get_session(token)
