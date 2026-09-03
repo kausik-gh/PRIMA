@@ -5,8 +5,11 @@ __pycache__/
 prima.db
 prima.db-wal
 prima.db-shm
+*.db
 .venv/
 venv/
 .env
 web/node_modules/
 web/dist/
+.DS_Store
+NOTES.md

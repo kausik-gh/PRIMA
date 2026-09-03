@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PRIMA hold isolation harness</title>
+  <style>
+    :root {
+      --ledger: #E8EBEF;
+      --surface: #FFFFFF;
+      --ink: #16202B;
+      --graphite: #5A6875;
+      --steel: #1F5C8C;
+      --hairline: #D2D8DF;
+      --t0: #3E7C5A;
+      --font-ui: "IBM Plex Sans", "Palatino Linotype", Palatino, "Times New Roman", serif;
+      --font-data: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      font-family: var(--font-ui);
+      background: var(--ledger);
+      color: var(--ink);
+      line-height: 1.45;
+    }
+    .chrome {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--hairline);
+      background: var(--surface);
+      font-size: 0.8125rem;
+      color: var(--graphite);
+    }
+    .mark { color: var(--ink); font-weight: 600; letter-spacing: 0.04em; }
+    main { max-width: 440px; padding: 32px 24px; }
+    .row {
+      display: flex;
+      justify-content: space-between;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--hairline);
+      font-size: 0.9375rem;
+    }
+    .mono {
+      font-family: var(--font-data);
+      font-variant-numeric: tabular-nums;
+    }
+    .status { margin: 24px 0; color: var(--graphite); font-size: 0.8125rem; }
+    .dot {
+      display: inline-block;
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--hairline);
+      margin-right: 8px;
+    }
+    .dot.on { background: var(--t0); }
+    .hold-card {
+      margin: 24px 0;
+      padding: 16px;
+      background: var(--surface);
+      border: 1px solid var(--hairline);
+    }
+    .hold-card.hidden { display: none; }
+    .hold-card p { margin: 0 0 8px; }
+    .actions { display: flex; flex-direction: column; gap: 12px; margin-top: 24px; }
+    button {
+      font-family: inherit;
+      font-size: 1rem;
+      padding: 14px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    button:focus-visible { outline: 2px solid var(--steel); outline-offset: 2px; }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    .open { background: var(--steel); color: #fff; border: 0; }
+    .cancel { background: transparent; color: var(--ink); border: 1px solid var(--ink); }
+  </style>
+</head>
+<body>
+  <header class="chrome">
+    <span class="mark">PRIMA isolation harness — not the product surface.</span>
+    <span>Demo ledger</span>
+  </header>
+  <main>
+    <div class="row"><span>Balance</span><span class="mono" id="balance">₹0</span></div>
+    <div class="row"><span>Available</span><span class="mono" id="available">₹0</span></div>
+    <p class="status"><span class="dot" id="dot"></span><span id="conn">connecting</span></p>
+    <section class="hold-card hidden" id="card">
+      <p>Reference <span class="mono" id="ref"></span></p>
+      <p>Held <span class="mono" id="held"></span></p>
+      <p id="until"></p>
+    </section>
+    <div class="actions">
+      <button type="button" class="open" id="btn-open">Open ₹8,000 hold</button>
+      <button type="button" class="cancel" id="btn-cancel" disabled>Cancel hold</button>
+    </div>
+  </main>
+  <script id="boot" type="application/json">__BOOT_JSON__</script>
+  <script>
+    const boot = JSON.parse(document.getElementById("boot").textContent);
+    let holdId = null;
+
+    function formatPaise(paise) {
+      const sign = paise < 0 ? "-" : "";
+      const rupees = Math.floor(Math.abs(paise) / 100);
+      const digits = String(rupees);
+      if (digits.length <= 3) return sign + "₹" + digits;
+      const last3 = digits.slice(-3);
+      let rest = digits.slice(0, -3);
+      const parts = [];
+      while (rest.length > 2) {
+        parts.unshift(rest.slice(-2));
+        rest = rest.slice(0, -2);
+      }
+      if (rest) parts.unshift(rest);
+      return sign + "₹" + parts.join(",") + "," + last3;
+    }
+
+    function setConnected(on) {
+      document.getElementById("dot").classList.toggle("on", on);
+      document.getElementById("conn").textContent = on ? "connected" : "connecting";
+    }
+
+    function renderView(data) {
+      document.getElementById("balance").textContent = formatPaise(data.balance_paise);
+      document.getElementById("available").textContent = formatPaise(data.available_paise);
+      const active = (data.active_holds || [])[0];
+      const card = document.getElementById("card");
+      if (!active) {
+        card.classList.add("hidden");
+        document.getElementById("btn-cancel").disabled = true;
+        holdId = null;
+        return;
+      }
+      document.getElementById("ref").textContent = active.reason_ref;
+      document.getElementById("held").textContent = formatPaise(active.held_paise);
+      document.getElementById("until").textContent = "Waiting until " + active.releases_at + ". You can cancel any time before then.";
+      card.classList.remove("hidden");
+      document.getElementById("btn-cancel").disabled = false;
+    }
+
+    function renderHoldEvent(data) {
+      document.getElementById("available").textContent = formatPaise(data.available_paise);
+      if (data.released_at) {
+        document.getElementById("card").classList.add("hidden");
+        document.getElementById("btn-cancel").disabled = true;
+        holdId = null;
+        return;
+      }
+      holdId = data.id;
+      document.getElementById("ref").textContent = data.reason_ref;
+      document.getElementById("held").textContent = formatPaise(data.held_paise);
+      document.getElementById("until").textContent = "Waiting until " + data.releases_at + ". You can cancel any time before then.";
+      document.getElementById("card").classList.remove("hidden");
+      document.getElementById("btn-cancel").disabled = false;
+    }
+
+    async function openHold() {
+      const resp = await fetch("/api/hold/open", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          transaction_id: boot.transaction_id,
+          account_id: boot.account_id,
+          held_paise: boot.held_paise
+        })
+      });
+      const body = await resp.json();
+      if (!resp.ok) return;
+      holdId = body.id;
+    }
+
+    async function cancelHold() {
+      if (!holdId) return;
+      await fetch("/api/hold/release", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hold_id: holdId, outcome: "cancelled_by_user" })
+      });
+    }
+
+    document.getElementById("btn-open").addEventListener("click", openHold);
+    document.getElementById("btn-cancel").addEventListener("click", cancelHold);
+
+    function connect() {
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      const socket = new WebSocket(proto + "//" + location.host + "/ws/pay/" + encodeURIComponent(boot.account_id));
+      socket.onopen = function () { setConnected(true); };
+      socket.onclose = function () { setConnected(false); };
+      socket.onmessage = function (event) {
+        const msg = JSON.parse(event.data);
+        if (msg.type === "snapshot") renderView(msg.data);
+        if (msg.type === "hold.opened" || msg.type === "hold.released") renderHoldEvent(msg.data);
+      };
+    }
+
+    connect();
+  </script>
+</body>
+</html>
