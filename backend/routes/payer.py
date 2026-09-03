@@ -307,7 +307,7 @@ async def commit(body: CommitBody, session: Session = Depends(get_session)):
     contact_note = None
     if decision.tier == 4:
         contact_note = await maybe_fire_for_tier4(
-            session, decision=decision, sender=sender, now=now
+            session, decision=decision, sender=sender, now=now, hold_id=hold.id
         )
 
     result: dict[str, Any] = {

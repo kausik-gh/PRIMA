@@ -13,6 +13,9 @@ from pydantic import BaseModel
 
 from backend.action import circuit_breaker as cb
 from backend.action import scoped_hold as sh
+from backend.core.db import engine
+from backend.core.models import CircuitBreakerLog, ScopedHold, TrustedContact
+from sqlmodel import Session, select
 
 router = APIRouter()
 harness_router = APIRouter()
@@ -114,7 +117,9 @@ async def watch_socket(ws: WebSocket, token: str) -> None:
                 )
                 continue
             try:
-                await cb.ack(hub, token, action)
+                from backend.action.payer_breaker import apply_contact_ack
+
+                await apply_contact_ack(token=token, action=action)
             except LookupError:
                 await ws.send_json(
                     envelope(
@@ -122,6 +127,16 @@ async def watch_socket(ws: WebSocket, token: str) -> None:
                         {
                             "code": "no_pending",
                             "message": "Nothing to respond to right now.",
+                        },
+                    )
+                )
+            except ValueError:
+                await ws.send_json(
+                    envelope(
+                        "error",
+                        {
+                            "code": "bad_action",
+                            "message": "action must be approved or hold.",
                         },
                     )
                 )
@@ -216,14 +231,89 @@ async def watch_fire(body: FireRequest):
 @harness_router.get("/api/watch/{token}/status")
 async def watch_status(token: str):
     if cb.get_session(token) is None:
-        return _http_error(404, "unknown_token", "No watch session for that token.")
+        # Allow status for SQL-only tokens after seed sync
+        with Session(engine) as db:
+            contact = db.exec(
+                select(TrustedContact).where(TrustedContact.watch_token == token)
+            ).first()
+            if contact is None:
+                return _http_error(404, "unknown_token", "No watch session for that token.")
     row = cb.latest_log(token)
+    sql_ack = None
+    hold_summary = None
+    with Session(engine) as db:
+        contact = db.exec(
+            select(TrustedContact).where(TrustedContact.watch_token == token)
+        ).first()
+        if contact is not None:
+            logs = list(
+                db.exec(
+                    select(CircuitBreakerLog).where(
+                        CircuitBreakerLog.contact_id == contact.id
+                    )
+                ).all()
+            )
+            if logs:
+                latest = logs[-1]
+                sql_ack = {
+                    "ack": bool(latest.ack),
+                    "ack_action": latest.ack_action,
+                    "ack_at": latest.ack_at.isoformat().replace("+00:00", "Z")
+                    if latest.ack_at
+                    else None,
+                    "log_id": latest.id,
+                }
+                payload = dict(latest.payload or {})
+                hold_id = payload.get("hold_id")
+                hold = db.get(ScopedHold, hold_id) if hold_id else None
+                if hold is not None:
+                    hold_summary = {
+                        "hold_id": hold.id,
+                        "released_at": hold.released_at.isoformat().replace("+00:00", "Z")
+                        if hold.released_at
+                        else None,
+                        "releases_at": hold.releases_at.isoformat().replace("+00:00", "Z")
+                        if hold.releases_at
+                        else None,
+                        "outcome": hold.outcome,
+                        "held_paise": hold.held_paise,
+                    }
     return {
         "connected": hub.client_count(f"watch:{token}") > 0,
         "last_payload": None if row is None else row["payload"],
         "ack": False if row is None else bool(row["ack"]),
         "ack_action": None if row is None else row["ack_action"],
+        "sql_ack": sql_ack,
+        "hold": hold_summary,
     }
+
+
+class WatchAckRequest(BaseModel):
+    token: str
+    action: str
+
+
+@harness_router.post("/api/watch/ack")
+async def watch_ack(body: WatchAckRequest):
+    if body.action not in ("approved", "hold"):
+        return _http_error(400, "bad_action", "action must be approved or hold.")
+    # Ensure watch token is known in memory or SQL
+    if cb.get_session(body.token) is None:
+        with Session(engine) as db:
+            contact = db.exec(
+                select(TrustedContact).where(TrustedContact.watch_token == body.token)
+            ).first()
+            if contact is None:
+                return _http_error(404, "unknown_token", "No watch session for that token.")
+    try:
+        from backend.action.payer_breaker import apply_contact_ack
+
+        result = await apply_contact_ack(token=body.token, action=body.action)
+    except LookupError:
+        return _http_error(404, "no_pending", "Nothing to respond to right now.")
+    except ValueError:
+        return _http_error(400, "bad_action", "action must be approved or hold.")
+    return result
 
 
 class OpenHoldRequest(BaseModel):
