@@ -291,6 +291,13 @@ export function PayPage() {
           <Money paise={account?.available_paise ?? 0} />
         </div>
 
+        {asParam && !quote ? (
+          <p className="pay-context">
+            This works like a real payment — the balance and holds are genuine, just on a
+            demo ledger, not a bank.
+          </p>
+        ) : null}
+
         {!quote ? (
           <form onSubmit={onQuote}>
             {!asParam ? (

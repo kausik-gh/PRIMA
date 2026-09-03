@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { NavLink } from "react-router-dom";
 import { DecisionRail } from "../components/DecisionRail";
 import { InvestigationDrawer } from "../components/InvestigationDrawer";
 import { MetricStrip } from "../components/MetricStrip";
 import { QuadrantPanel } from "../components/QuadrantPanel";
 import { RiskGraph } from "../components/RiskGraph";
+import { TierLegend } from "../components/TierLegend";
 import { api } from "../lib/api";
 import { useTopicSocket } from "../lib/ws";
 import type {
@@ -164,16 +164,12 @@ export function ConsolePage() {
   };
 
   return (
-    <div className="console">
-      <nav className="spine">
-        <NavLink to="/console" title="Live">
-          Lv
-        </NavLink>
-        <NavLink to="/ops" title="Ops">
-          Op
-        </NavLink>
-      </nav>
-      <MetricStrip metrics={metrics} />
+    <>
+      <div className="console-context">
+        Every payment attempt, scored live. Click a node to see why.
+      </div>
+      <div className="console">
+        <MetricStrip metrics={metrics} />
       <div className="stage">
         <RiskGraph
           nodes={nodes}
@@ -200,6 +196,10 @@ export function ConsolePage() {
           >
             {paused ? "Resume" : "Pause"}
           </button>
+          <details className="legend-details">
+            <summary>Tiers</summary>
+            <TierLegend />
+          </details>
         </div>
         {drawer ? (
           <InvestigationDrawer
@@ -209,8 +209,13 @@ export function ConsolePage() {
           />
         ) : null}
       </div>
-      <DecisionRail items={decisions} queued={queued} onOpen={(item) => void openDecision(item)} />
-      <QuadrantPanel items={decisions} />
-    </div>
+        <DecisionRail
+          items={decisions}
+          queued={queued}
+          onOpen={(item) => void openDecision(item)}
+        />
+        <QuadrantPanel items={decisions} />
+      </div>
+    </>
   );
 }

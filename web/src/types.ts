@@ -148,4 +148,5 @@ export type Health = {
   gnn_model_loaded: boolean;
   ws_clients: number;
   last_decision_at: string | null;
+  ambient_running?: boolean;
 };
