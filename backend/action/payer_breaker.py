@@ -19,6 +19,7 @@ from backend.core.models import (
     CircuitBreakerLog,
     RiskDecision,
     ScopedHold,
+    Transaction,
     TrustedContact,
     utc_now,
 )
@@ -137,7 +138,10 @@ async def maybe_fire_for_tier4(
 
 
 async def apply_contact_ack(*, token: str, action: str) -> dict[str, Any]:
-    """SQL + in-memory CircuitBreaker ack; extend or release the linked ScopedHold."""
+    """SQL + in-memory CircuitBreaker ack; extend hold or settle remaining amount.
+
+    Cooling timeout (not this phase) would settle like approved — same debit/credit path.
+    """
     if action not in ("approved", "hold"):
         raise ValueError("bad_action")
 
@@ -167,45 +171,79 @@ async def apply_contact_ack(*, token: str, action: str) -> dict[str, Any]:
         decision = session.get(RiskDecision, log.decision_id)
         hold = _find_active_hold(session, payload=payload, decision=decision)
 
-        log.ack = True
-        log.ack_action = action
-        log.ack_at = now
-        session.add(log)
-
         outcome: str | None = None
         releases_at_iso: str | None = None
         hold_id: str | None = hold.id if hold is not None else None
         avail: int | None = None
+        pay_topic: str | None = None
+        pay_event: str | None = None
+        pay_data: dict[str, Any] | None = None
 
-        if hold is not None:
-            account = session.get(Account, hold.account_id)
-            if action == "hold":
-                base = _aware(hold.releases_at or now)
-                hold.releases_at = max(_aware(now), base) + timedelta(minutes=COOLING_MINUTES)
-                session.add(hold)
-                session.commit()
-                session.refresh(hold)
-                avail = available_paise(session, account) if account is not None else None
-                releases_at_iso = iso(hold.releases_at) if hold.releases_at else None
-                await hub.broadcast(
-                    f"pay:{hold.account_id}",
-                    envelope("hold.extended", _hold_event_data(hold, avail or 0)),
-                )
-            else:
-                hold.released_at = now
-                hold.outcome = "released"
-                session.add(hold)
-                session.commit()
-                session.refresh(hold)
-                outcome = "released"
-                avail = available_paise(session, account) if account is not None else None
-                releases_at_iso = iso(hold.releases_at) if hold.releases_at else None
-                await hub.broadcast(
-                    f"pay:{hold.account_id}",
-                    envelope("hold.released", _hold_event_data(hold, avail or 0)),
-                )
-        else:
+        if hold is not None and action == "hold":
+            base = _aware(hold.releases_at or now)
+            hold.releases_at = max(_aware(now), base) + timedelta(minutes=COOLING_MINUTES)
+            log.ack = True
+            log.ack_action = action
+            log.ack_at = now
+            session.add(hold)
+            session.add(log)
             session.commit()
+            session.refresh(hold)
+            account = session.get(Account, hold.account_id)
+            avail = available_paise(session, account) if account is not None else None
+            releases_at_iso = iso(hold.releases_at) if hold.releases_at else None
+            pay_topic = f"pay:{hold.account_id}"
+            pay_event = "hold.extended"
+            pay_data = _hold_event_data(hold, avail or 0)
+
+        elif hold is not None and action == "approved":
+            tx = session.get(Transaction, hold.transaction_id)
+            if tx is None:
+                raise LookupError("unknown_transaction")
+            if hold.account_id != tx.sender_id:
+                raise ValueError("inbound_never_held")
+            sender = session.get(Account, tx.sender_id)
+            receiver = session.get(Account, tx.receiver_id)
+            if sender is None or receiver is None:
+                raise LookupError("unknown_account")
+            # Held amount is already reserved via available_paise; balance still includes it.
+            if sender.balance_paise < hold.held_paise:
+                raise ValueError("insufficient_available")
+
+            sender.balance_paise -= hold.held_paise
+            receiver.balance_paise += hold.held_paise
+            hold.released_at = now
+            hold.outcome = "released"
+            tx.status = "settled"
+            tx.settled_at = now
+            log.ack = True
+            log.ack_action = action
+            log.ack_at = now
+            session.add(sender)
+            session.add(receiver)
+            session.add(hold)
+            session.add(tx)
+            session.add(log)
+            session.commit()
+            session.refresh(hold)
+            session.refresh(sender)
+            outcome = "released"
+            avail = available_paise(session, sender)
+            releases_at_iso = iso(hold.releases_at) if hold.releases_at else None
+            pay_topic = f"pay:{hold.account_id}"
+            pay_event = "hold.released"
+            pay_data = _hold_event_data(hold, avail)
+
+        else:
+            # No active hold — still record ack.
+            log.ack = True
+            log.ack_action = action
+            log.ack_at = now
+            session.add(log)
+            session.commit()
+
+        if pay_topic and pay_event and pay_data is not None:
+            await hub.broadcast(pay_topic, envelope(pay_event, pay_data))
 
         # Keep isolation BREAKER_LOG in sync; broadcast acked if memory has no row.
         try:

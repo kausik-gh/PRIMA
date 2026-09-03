@@ -309,10 +309,24 @@ async def watch_ack(body: WatchAckRequest):
         from backend.action.payer_breaker import apply_contact_ack
 
         result = await apply_contact_ack(token=body.token, action=body.action)
-    except LookupError:
-        return _http_error(404, "no_pending", "Nothing to respond to right now.")
-    except ValueError:
-        return _http_error(400, "bad_action", "action must be approved or hold.")
+    except LookupError as exc:
+        code = str(exc) if str(exc) in {"no_pending", "unknown_transaction", "unknown_account"} else "no_pending"
+        messages = {
+            "no_pending": "Nothing to respond to right now.",
+            "unknown_transaction": "No transaction for that hold.",
+            "unknown_account": "Sender or receiver account missing.",
+        }
+        return _http_error(404, code, messages.get(code, code))
+    except ValueError as exc:
+        code = str(exc)
+        messages = {
+            "bad_action": "action must be approved or hold.",
+            "inbound_never_held": "Inbound money is never held. Only outbound.",
+            "insufficient_available": "Sender balance cannot cover the held remainder.",
+        }
+        if code not in messages:
+            code = "bad_action"
+        return _http_error(400, code, messages[code])
     return result
 
 
