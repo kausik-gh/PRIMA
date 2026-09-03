@@ -1,0 +1,36 @@
+{
+  "id": "d_fixture_tier4",
+  "sender_id": "acct_isolation_ramesh",
+  "beneficiary_id": "acct_quickcash",
+  "amount_paise": 40000000,
+  "ringwatch_score": 0.71,
+  "trailscore_score": 0.82,
+  "contextflag_score": 0.55,
+  "cross_term_bonus": 0.15,
+  "fused_score": 0.859,
+  "tier": 4,
+  "verdict": "high_risk",
+  "rules_fired": [
+    {"code": "fresh_fan_in", "points": 3, "detail": "account 6 days old, in-degree 14"},
+    {"code": "pass_through", "points": 2, "detail": "retention ratio 0.04"},
+    {"code": "shared_device", "points": 3, "detail": "4 accounts on device d_44a1"},
+    {"code": "login_new_device", "points": 0, "detail": "new device signed in 15 minutes ago"},
+    {"code": "limit_raised", "points": 0, "detail": "transfer limit raised 8 minutes ago"},
+    {"code": "never_paid_before", "points": 0, "detail": "sender has never paid beneficiary"}
+  ],
+  "config_version": "1.0.0-fixture",
+  "quote_at": "2026-09-03T15:41:02.118Z",
+  "meta": {
+    "beneficiary_age_days": 6,
+    "unique_senders_today": 14,
+    "retention_minutes_typical": 12,
+    "minutes_since_limit_raised": 8,
+    "minutes_since_new_device": 15,
+    "prior_payments_to_beneficiary": 0,
+    "fusion_weights": {"ringwatch": 0.40, "trailscore": 0.35, "contextflag": 0.25},
+    "model_sha256": {
+      "rf": "fixture_rf_sha256_not_a_real_model_digest_0001",
+      "gnn": "fixture_gnn_sha256_not_a_real_model_digest_0001"
+    }
+  }
+}
