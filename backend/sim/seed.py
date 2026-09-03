@@ -52,6 +52,11 @@ EXTRA_MULE_HANDLES = [
 
 DORMANT_HANDLE = "dormant.wake@prima"
 
+PIPE_HANDLES = (
+    "pipe.a@prima",
+    "pipe.b@prima",
+)
+
 BANK_CODES = ("BANKA", "BANKA", "BANKA", "BANKA", "BANKA", "BANKA", "BANKA", "BANKB", "BANKC")
 
 # Bland merchant notes only. Do not add social-engineering phrasing here.
@@ -217,7 +222,12 @@ def seed_database(accounts: int = 500, days: int = 21, *, reset: bool = True) ->
     if accounts < 20:
         raise ValueError("seed_database requires at least 20 accounts")
 
-    reserved = set(NAMED_HANDLES) | set(EXTRA_MULE_HANDLES) | {DORMANT_HANDLE}
+    reserved = (
+        set(NAMED_HANDLES)
+        | set(EXTRA_MULE_HANDLES)
+        | {DORMANT_HANDLE}
+        | set(PIPE_HANDLES)
+    )
     regular_count = accounts - len(reserved)
     regular_handles = _build_regular_handles(regular_count, reserved)
 
@@ -313,6 +323,22 @@ def seed_database(accounts: int = 500, days: int = 21, *, reset: bool = True) ->
         balance_paise=random.randint(20_000_00, 5_00_000_00),
         device_id="dev-dormant-wake-own",
         ground_truth_role=None,
+    )
+    by_handle["pipe.a@prima"] = _make_account(
+        "pipe.a@prima",
+        "Pipe A",
+        created_at=_utc(seed_now, days=20),
+        balance_paise=0,
+        device_id="dev-pipe-a",
+        ground_truth_role="mule",
+    )
+    by_handle["pipe.b@prima"] = _make_account(
+        "pipe.b@prima",
+        "Pipe B",
+        created_at=_utc(seed_now, days=20),
+        balance_paise=0,
+        device_id="dev-pipe-b",
+        ground_truth_role="mule",
     )
 
     window_start = seed_now - timedelta(days=days)
@@ -422,6 +448,33 @@ def seed_database(accounts: int = 500, days: int = 21, *, reset: bool = True) ->
         sink_b,
         part_b,
         seed_now - timedelta(hours=5),
+        note="utilities",
+        is_seeded_attack=True,
+    )
+
+    # Act 5 three-hop drain. taint_ratio stays 0.0 until mark_fraudulent.
+    hop_paise = 800_000
+    add_tx(
+        quickcash,
+        by_handle["pipe.a@prima"],
+        hop_paise,
+        seed_now - timedelta(hours=4),
+        note="utilities",
+        is_seeded_attack=True,
+    )
+    add_tx(
+        by_handle["pipe.a@prima"],
+        by_handle["pipe.b@prima"],
+        hop_paise,
+        seed_now - timedelta(hours=3),
+        note="utilities",
+        is_seeded_attack=True,
+    )
+    add_tx(
+        by_handle["pipe.b@prima"],
+        by_handle["merchant.ok@prima"],
+        hop_paise,
+        seed_now - timedelta(hours=2),
         note="utilities",
         is_seeded_attack=True,
     )
