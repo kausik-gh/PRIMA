@@ -20,12 +20,12 @@ The system simulates fraud attack patterns (Fan-In, Fan-Out) and classifies mule
 ```
 backend/
 frontend/
-Initially used/
+lib/
 ```
 
 - **backend/** → Core fraud logic, simulation, detection, training
-- **frontend/** → Streamlit dashboard
-- **Initially used/** → Early prototype versions (kept for development history)
+- **frontend/** → HTML/JS web dashboard
+- **lib/** → Static assets for the dashboard
 
 ---
 
@@ -37,7 +37,7 @@ Initially used/
 - Fraud role classification
 - Behavioral drift detection
 - Adaptive thresholding system
-- Interactive Streamlit dashboard
+- Interactive web dashboard with live graph visualization
 
 ---
 
@@ -52,14 +52,16 @@ git clone https://github.com/kausik-gh/CROSS-CHANNEL-MONEY-MULE-DETECTION.git
 Install dependencies:
 
 ```
-pip install -r requirements.txt
+pip install fastapi uvicorn pandas numpy scikit-learn shap joblib networkx
 ```
 
 Run the application:
 
 ```
-streamlit run frontend/streamlit_app.py
+python -m uvicorn backend.api:app --reload --port 8088
 ```
+
+Open the dashboard at [http://localhost:8088](http://localhost:8088)
 
 ---
 
@@ -71,4 +73,4 @@ This system demonstrates a research-oriented approach to cross-channel fraud det
 
 ## Author
 
-Kausik GH  
+Kausik GH
