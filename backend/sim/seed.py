@@ -42,13 +42,20 @@ NAMED_HANDLES = [
     "merchant.ok@prima",
 ]
 
-# Extra labelled mule structures so the later PS3 denominator is > 1.
+# Extra labelled collection/ring structures so the later PS3 denominator is > 1.
 EXTRA_MULE_HANDLES = [
     "cashpool@prima",
     "neel.m@prima",
     "tara.m@prima",
     "om.m@prima",
 ]
+
+DORMANT_HANDLE = "dormant.wake@prima"
+
+PIPE_HANDLES = (
+    "pipe.a@prima",
+    "pipe.b@prima",
+)
 
 BANK_CODES = ("BANKA", "BANKA", "BANKA", "BANKA", "BANKA", "BANKA", "BANKA", "BANKB", "BANKC")
 
@@ -215,7 +222,12 @@ def seed_database(accounts: int = 500, days: int = 21, *, reset: bool = True) ->
     if accounts < 20:
         raise ValueError("seed_database requires at least 20 accounts")
 
-    reserved = set(NAMED_HANDLES) | set(EXTRA_MULE_HANDLES)
+    reserved = (
+        set(NAMED_HANDLES)
+        | set(EXTRA_MULE_HANDLES)
+        | {DORMANT_HANDLE}
+        | set(PIPE_HANDLES)
+    )
     regular_count = accounts - len(reserved)
     regular_handles = _build_regular_handles(regular_count, reserved)
 
@@ -302,6 +314,30 @@ def seed_database(accounts: int = 500, days: int = 21, *, reset: bool = True) ->
         created_at=_utc(seed_now, days=11),
         balance_paise=random.randint(8_000_00, 20_000_00),
         device_id=ring_device,
+        ground_truth_role="mule",
+    )
+    by_handle[DORMANT_HANDLE] = _make_account(
+        DORMANT_HANDLE,
+        "Dormant Wake",
+        created_at=_utc(seed_now, days=400),
+        balance_paise=random.randint(20_000_00, 5_00_000_00),
+        device_id="dev-dormant-wake-own",
+        ground_truth_role=None,
+    )
+    by_handle["pipe.a@prima"] = _make_account(
+        "pipe.a@prima",
+        "Pipe A",
+        created_at=_utc(seed_now, days=20),
+        balance_paise=0,
+        device_id="dev-pipe-a",
+        ground_truth_role="mule",
+    )
+    by_handle["pipe.b@prima"] = _make_account(
+        "pipe.b@prima",
+        "Pipe B",
+        created_at=_utc(seed_now, days=20),
+        balance_paise=0,
+        device_id="dev-pipe-b",
         ground_truth_role="mule",
     )
 
@@ -416,6 +452,33 @@ def seed_database(accounts: int = 500, days: int = 21, *, reset: bool = True) ->
         is_seeded_attack=True,
     )
 
+    # Act 5 three-hop drain. taint_ratio stays 0.0 until mark_fraudulent.
+    hop_paise = 800_000
+    add_tx(
+        quickcash,
+        by_handle["pipe.a@prima"],
+        hop_paise,
+        seed_now - timedelta(hours=4),
+        note="utilities",
+        is_seeded_attack=True,
+    )
+    add_tx(
+        by_handle["pipe.a@prima"],
+        by_handle["pipe.b@prima"],
+        hop_paise,
+        seed_now - timedelta(hours=3),
+        note="utilities",
+        is_seeded_attack=True,
+    )
+    add_tx(
+        by_handle["pipe.b@prima"],
+        by_handle["merchant.ok@prima"],
+        hop_paise,
+        seed_now - timedelta(hours=2),
+        note="utilities",
+        is_seeded_attack=True,
+    )
+
     # Extra mule fan-in (structure 2).
     cashpool = by_handle["cashpool@prima"]
     pool_senders = regular_accounts[18:24]
@@ -459,6 +522,27 @@ def seed_database(accounts: int = 500, days: int = 21, *, reset: bool = True) ->
                 note="household",
                 is_seeded_attack=True,
             )
+
+    # Quiet old activity, then one recent inbound after a long gap.
+    dormant = by_handle[DORMANT_HANDLE]
+    dormant_priors = regular_accounts[40:45]
+    prior_amount = 50_000
+    prior_offsets = (100, 90, 80, 70, 45)
+    for i, sender in enumerate(dormant_priors):
+        add_tx(
+            sender,
+            dormant,
+            prior_amount,
+            seed_now - timedelta(days=prior_offsets[i]),
+            note="salary",
+        )
+    add_tx(
+        regular_accounts[45],
+        dormant,
+        prior_amount * 6,
+        seed_now - timedelta(hours=2),
+        note="salary",
+    )
 
     # Sparse events so TrailScore has material later -- not a firehose.
     for i, acct in enumerate(regular_accounts[:40]):

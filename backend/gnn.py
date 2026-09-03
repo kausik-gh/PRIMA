@@ -21,18 +21,16 @@ import pandas as pd
 import networkx as nx
 
 # ---------------------------------------------------------------------------
-# Graceful PyG import — clear error message if not installed
+# Graceful PyG import — RingWatch degrades to gnn_offline if pyg is missing
 # ---------------------------------------------------------------------------
 try:
     from torch_geometric.data import Data
     from torch_geometric.nn import GATConv
+    PYG_AVAILABLE = True
 except ImportError:
-    raise ImportError(
-        "PyTorch Geometric is required for the GNN layer.\n"
-        "Install with:\n"
-        "  pip install torch-geometric\n"
-        "See https://pytorch-geometric.readthedocs.io for CUDA-specific builds."
-    )
+    PYG_AVAILABLE = False
+    Data = None
+    GATConv = None
 
 # ---------------------------------------------------------------------------
 # Feature columns — all 10 (includes account_age_days unlike RF training)
@@ -219,19 +217,22 @@ def gnn_predict(
     """
 
     import os
-    if not os.path.exists(model_path):
-        # Graceful degradation — GNN not trained yet, return neutral scores
-        return pd.DataFrame({
-            "account_id": list(G.nodes()),
-            "gnn_score": [0.0] * G.number_of_nodes()
-        })
+
+    zeros = pd.DataFrame({
+        "account_id": list(G.nodes()),
+        "gnn_score": [0.0] * G.number_of_nodes()
+    })
+    if not PYG_AVAILABLE or not os.path.exists(model_path):
+        return zeros
+
+    device = "cpu"
 
     # Build PyG data object
     data = graph_to_pyg(G, features_df)
 
-    # Load model
+    # Load model — always CPU, even if a caller passed cuda
     model = FraudGAT(in_channels=len(GNN_FEATURE_COLUMNS))
-    model.load_state_dict(torch.load(model_path, map_location=device))
+    model.load_state_dict(torch.load(model_path, map_location="cpu"))
     model.eval()
 
     data = data.to(device)
