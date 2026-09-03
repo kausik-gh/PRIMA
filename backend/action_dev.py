@@ -1,12 +1,16 @@
 """CPU-safe CircuitBreaker isolation app. Does not load models.
 
 Run: uvicorn backend.action_dev:app --host 0.0.0.0 --port 8088
+
+Kept as P3's isolation harness. Canonical process is backend.api:app,
+which mounts the same payer and WS routers.
 """
 
 from __future__ import annotations
 
 import json
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -15,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from backend.action import circuit_breaker as cb
+from backend.action.payer_seed import ensure_payer_seed
 from backend.action.reasonline import (
     assert_user_reason_safe,
     bank,
@@ -23,6 +28,8 @@ from backend.action.reasonline import (
     user,
     verify_regulator_record,
 )
+from backend.core.db import create_db_and_tables
+from backend.routes.payer import router as payer_router
 from backend.routes.ws import harness_router, router as ws_router
 
 HARNESS_PATH = Path(__file__).resolve().parent / "action" / "watch_harness.html"
@@ -48,7 +55,20 @@ def _cors_origins() -> list[str]:
     return unique
 
 
-app = FastAPI(title="PRIMA CircuitBreaker isolation", docs_url=None, redoc_url=None)
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    create_db_and_tables()
+    # Isolation-only seeder. Long-term demo seed is backend.sim.seed.
+    ensure_payer_seed()
+    yield
+
+
+app = FastAPI(
+    title="PRIMA CircuitBreaker isolation",
+    docs_url=None,
+    redoc_url=None,
+    lifespan=lifespan,
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),
@@ -58,6 +78,7 @@ app.add_middleware(
 )
 app.include_router(ws_router)
 app.include_router(harness_router)
+app.include_router(payer_router)
 
 
 @app.exception_handler(RequestValidationError)

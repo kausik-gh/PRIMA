@@ -1,1 +1,1 @@
-"""PRIMA action package — CircuitBreaker, ScopedHold, ReasonLine isolation."""
+"""PRIMA action package — CircuitBreaker, ScopedHold, ReasonLine, payer seed."""
