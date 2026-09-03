@@ -5,6 +5,7 @@ from backend.scoring.comprehension_probe import (
 from backend.scoring.contextflag import ContextFlagResult, contextflag_score
 from backend.scoring.fusion import FusionResult, fuse
 from backend.scoring.ladder import LadderResult, ladder_decide
+from backend.scoring.pipeline import ScoringPipelineResult, evaluate_sender_context
 from backend.scoring.quadrant import (
     QuadrantResult,
     build_quadrant_panel_item,
@@ -18,11 +19,13 @@ __all__ = [
     "FusionResult",
     "LadderResult",
     "QuadrantResult",
+    "ScoringPipelineResult",
     "TrailScoreResult",
     "build_comprehension_probe",
     "build_quadrant_panel_item",
     "classify_quadrant",
     "contextflag_score",
+    "evaluate_sender_context",
     "fuse",
     "ladder_decide",
     "trailscore_score",
