@@ -8,6 +8,9 @@ const ConsolePage = lazy(() =>
   import("./pages/ConsolePage").then((m) => ({ default: m.ConsolePage })),
 );
 const OpsPage = lazy(() => import("./pages/OpsPage").then((m) => ({ default: m.OpsPage })));
+const TopupPage = lazy(() =>
+  import("./pages/TopupPage").then((m) => ({ default: m.TopupPage })),
+);
 const WatchPage = lazy(() =>
   import("./pages/WatchPage").then((m) => ({ default: m.WatchPage })),
 );
@@ -66,6 +69,14 @@ export default function App() {
           element={
             <Shell>
               <OpsPage />
+            </Shell>
+          }
+        />
+        <Route
+          path="/topup"
+          element={
+            <Shell>
+              <TopupPage />
             </Shell>
           }
         />

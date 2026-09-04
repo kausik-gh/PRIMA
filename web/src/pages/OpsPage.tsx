@@ -336,6 +336,11 @@ export function OpsPage() {
               <div>
                 <div>{guest.handle}</div>
                 <a href={guest.pay_url}>{guest.pay_url}</a>
+                <div>
+                  <Link to={`/topup?account_id=${encodeURIComponent(guest.account_id)}`}>
+                    Fund via Razorpay
+                  </Link>
+                </div>
               </div>
             </div>
           ))}
