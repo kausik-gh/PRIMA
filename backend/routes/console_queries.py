@@ -14,6 +14,7 @@ from sqlmodel import Session, select
 
 from backend.action.payer_ledger import active_hold_rows, available_paise, iso
 from backend.core.config import get_config
+from backend.core.decision import _verdict_from_fused, fuse, ladder_tier
 from backend.core.models import (
     Account,
     ComprehensionProbe,
@@ -24,6 +25,9 @@ from backend.core.models import (
     Transaction,
     utc_now,
 )
+from backend.scoring.contextflag import contextflag_score
+from backend.scoring.ringwatch import ringwatch_score
+from backend.scoring.trailscore import trailscore_score
 
 AVAILABLE_ACTIONS = [
     "open_scoped_hold",
@@ -107,6 +111,7 @@ def graph_payload(
     txs = list(session.exec(select(Transaction)).all())
     txs.sort(key=lambda row: _aware(row.attempted_at), reverse=True)
     links: list[dict[str, Any]] = []
+    linked_ids: set[str] = set()
     for tx in txs:
         if tx.sender_id not in allowed or tx.receiver_id not in allowed:
             continue
@@ -123,11 +128,28 @@ def graph_payload(
                 "decision_id": decision.id if decision is not None else None,
             }
         )
+        linked_ids.add(tx.sender_id)
+        linked_ids.add(tx.receiver_id)
         if len(links) >= window:
             break
 
+    stage_handles = {
+        "ramesh@prima",
+        "priya.k@prima",
+        "grocery@prima",
+        "rentals@prima",
+        "quickcash@prima",
+        "merchant.ok@prima",
+    }
     nodes = []
     for acct in accounts:
+        keep = (
+            acct.id in linked_ids
+            or acct.is_demo_guest
+            or acct.handle in stage_handles
+        )
+        if not keep:
+            continue
         latest = _latest_decision_for(session, acct.id)
         nodes.append(
             {
@@ -139,6 +161,7 @@ def graph_payload(
                 "risk": latest.fused_score if latest is not None else 0.0,
                 "age_days": _age_days(acct.created_at),
                 "is_held": acct.id in held_ids,
+                "is_guest": bool(acct.is_demo_guest),
             }
         )
     return {"nodes": nodes, "links": links}
@@ -159,6 +182,7 @@ def graph_node(session: Session, account_id: str) -> dict[str, Any] | None:
         "risk": latest.fused_score if latest is not None else 0.0,
         "age_days": _age_days(acct.created_at),
         "is_held": held,
+        "is_guest": bool(acct.is_demo_guest),
     }
 
 
@@ -190,11 +214,9 @@ def list_decisions(
     return {"items": [decision_item(session, row) for row in rows[:limit]]}
 
 
-def _contributions_from(decision: RiskDecision) -> list[dict[str, Any]]:
-    bank = decision.bank_reason if isinstance(decision.bank_reason, dict) else {}
-    raw = bank.get("contributions")
-    if isinstance(raw, list) and raw:
-        return list(raw)
+def _contributions_from_values(
+    ring: float, trail: float, ctx: float, cross_bonus: float
+) -> list[dict[str, Any]]:
     cfg = get_config()
     fusion = cfg.get("fusion") if isinstance(cfg.get("fusion"), dict) else {}
     weights = {
@@ -202,11 +224,7 @@ def _contributions_from(decision: RiskDecision) -> list[dict[str, Any]]:
         "trailscore": float(fusion.get("trailscore_weight", 0.35)),
         "contextflag": float(fusion.get("contextflag_weight", 0.25)),
     }
-    values = {
-        "ringwatch": float(decision.ringwatch_score),
-        "trailscore": float(decision.trailscore_score),
-        "contextflag": float(decision.contextflag_score),
-    }
+    values = {"ringwatch": ring, "trailscore": trail, "contextflag": ctx}
     out = [
         {
             "scorer": name,
@@ -220,44 +238,62 @@ def _contributions_from(decision: RiskDecision) -> list[dict[str, Any]]:
         {
             "scorer": "cross_term",
             "weight": None,
-            "value": float(decision.cross_term_bonus),
-            "contribution": round(float(decision.cross_term_bonus), 3),
+            "value": round(cross_bonus, 3),
+            "contribution": round(cross_bonus, 3),
         }
     )
     return out
 
 
-def _rules_fired(decision: RiskDecision) -> list[dict[str, Any]]:
+def _rules_from_lists(*rule_lists: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
-    for item in list(decision.rules_fired or []):
-        if not isinstance(item, dict):
-            continue
-        out.append(
-            {
-                "code": item.get("code"),
-                "points": item.get("points"),
-                "detail": item.get("detail"),
-            }
-        )
+    for rules in rule_lists:
+        for item in rules or []:
+            if not isinstance(item, dict):
+                continue
+            out.append(
+                {
+                    "code": item.get("code"),
+                    "points": item.get("points"),
+                    "detail": item.get("detail"),
+                }
+            )
     return out
 
 
 def investigate_payload(session: Session, account_id: str) -> dict[str, Any] | None:
+    """Investigation is always this account's OWN risk profile.
+
+    RingWatch is this account's network position (fan-in/out, taint, GNN).
+    TrailScore is this account's OWN event sequence — it must NOT be pulled
+    from a decision where this account was only the beneficiary, or the
+    sender's trail leaks onto every account they've recently paid. Both are
+    recomputed fresh here rather than read off `_latest_decision_for`, which
+    only reflects the role this account played in one past transaction.
+    """
     acct = session.get(Account, account_id)
     if acct is None:
         return None
-    latest = _latest_decision_for(session, account_id)
-    sub = {"ringwatch": 0.0, "trailscore": 0.0, "contextflag": 0.0}
-    contributions: list[dict[str, Any]] = []
-    rules: list[dict[str, Any]] = []
-    if latest is not None:
-        sub = {
-            "ringwatch": float(latest.ringwatch_score),
-            "trailscore": float(latest.trailscore_score),
-            "contextflag": float(latest.contextflag_score),
-        }
-        contributions = _contributions_from(latest)
-        rules = _rules_fired(latest)
+
+    ring_result = ringwatch_score(account_id, session)
+    trail_score, trail_rules = trailscore_score(account_id, amount_paise=0, session=session)
+    ctx_score, ctx_rules = contextflag_score(None, account_id, session)
+
+    cfg = get_config()
+    fused, cross_bonus = fuse(ring_result.score, trail_score, ctx_score, cfg)
+    fused = max(0.0, min(1.0, fused))
+    tier, _action = ladder_tier(fused, cfg)
+    verdict = _verdict_from_fused(fused)
+
+    sub = {
+        "ringwatch": float(ring_result.score),
+        "trailscore": float(trail_score),
+        "contextflag": float(ctx_score),
+    }
+    contributions = _contributions_from_values(
+        ring_result.score, trail_score, ctx_score, cross_bonus or 0.0
+    )
+    rules = _rules_from_lists(ring_result.rules_fired, trail_rules, ctx_rules)
 
     events = [
         row
@@ -309,6 +345,9 @@ def investigate_payload(session: Session, account_id: str) -> dict[str, Any] | N
             "is_held": bool(active_hold_rows(session, acct.id)),
         },
         "sub_scores": sub,
+        "fused_score": round(fused, 3),
+        "tier": tier,
+        "verdict": verdict,
         "contributions": contributions,
         "rules_fired": rules,
         "event_timeline": timeline,

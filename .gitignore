@@ -9,6 +9,8 @@ prima.db-shm
 .venv/
 venv/
 .env
+.env.local
+web/.env.local
 web/node_modules/
 web/dist/
 .DS_Store

@@ -282,6 +282,44 @@ def ops_reset():
     return {"ok": True}
 
 
+NAMED_HANDLES = frozenset(
+    {
+        "ramesh@prima",
+        "priya.k@prima",
+        "grocery@prima",
+        "rentals@prima",
+        "quickcash@prima",
+        "merchant.ok@prima",
+    }
+)
+
+
+@router.get("/directory")
+def ops_directory(session: Session = Depends(get_session)):
+    """Named demo accounts plus guests. Ops panel uses this to pick inject targets."""
+    contacts = {
+        row.account_id: row for row in session.exec(select(TrustedContact)).all()
+    }
+    items: list[dict[str, Any]] = []
+    for acct in session.exec(select(Account)).all():
+        if acct.handle not in NAMED_HANDLES and not acct.is_demo_guest:
+            continue
+        contact = contacts.get(acct.id)
+        items.append(
+            {
+                "id": acct.id,
+                "handle": acct.handle,
+                "display_name": acct.display_name,
+                "is_demo_guest": bool(acct.is_demo_guest),
+                "balance_paise": acct.balance_paise,
+                "watch_token": contact.watch_token if contact is not None else None,
+                "contact_name": contact.contact_name if contact is not None else None,
+            }
+        )
+    items.sort(key=lambda row: (not row["is_demo_guest"], row["handle"]))
+    return {"items": items}
+
+
 @router.get("/health")
 def ops_health(session: Session = Depends(get_session)):
     db_ok = True
