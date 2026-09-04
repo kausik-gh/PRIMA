@@ -64,8 +64,16 @@ def _facts(decision: dict) -> list[str]:
     senders = meta.get("unique_senders_today")
     if senders is not None:
         candidates.append(f"{senders} different people have sent it money today.")
-    if meta.get("prior_payments_to_beneficiary") == 0:
+    prior = meta.get("prior_payments_to_beneficiary")
+    if prior == 0:
         candidates.append("You have never paid this account before.")
+    elif prior is not None and prior >= 1:
+        # Closes a real crash risk: a known payee with no recent trail
+        # events and no retention pair on the beneficiary previously left
+        # only 2 candidates (age, senders), and user() requires exactly 3.
+        # This is real data already in meta, not a filler number.
+        times = "once" if prior == 1 else f"{prior} times"
+        candidates.append(f"You have paid this account {times} before.")
     retention = meta.get("retention_minutes_typical")
     if retention is not None:
         candidates.append(
