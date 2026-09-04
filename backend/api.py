@@ -29,6 +29,8 @@ from backend.core.ensure_demo import ensure_smoke_merchant
 from backend.routes.console import router as console_router
 from backend.routes.ops import router as ops_router
 from backend.routes.payer import router as payer_router
+from backend.routes.razorpay_topup import router as razorpay_topup_router
+from backend.routes.razorpay_webhook import router as razorpay_webhook_router
 from backend.routes.ws import harness_router, router as ws_router
 
 
@@ -58,6 +60,8 @@ app.include_router(harness_router)
 app.include_router(payer_router)
 app.include_router(console_router)
 app.include_router(ops_router)
+app.include_router(razorpay_topup_router)
+app.include_router(razorpay_webhook_router)
 
 
 @app.exception_handler(Exception)

@@ -306,3 +306,31 @@ class BankMeshSignal(SQLModel, table=True):
     shared_at: datetime = Field(
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
+
+
+class RazorpayTopup(SQLModel, table=True):
+    """A real Razorpay Test Mode payment that funds a demo account's
+    balance_paise. This is the ONLY place real payment-gateway money
+    enters PRIMA. Never referenced by scoring, never a Transaction row —
+    a Transaction is a transfer between two demo accounts; this is money
+    entering the ledger from outside it."""
+
+    __tablename__ = "razorpay_topups"
+
+    id: str = Field(default_factory=new_id, primary_key=True)
+    account_id: str = Field(foreign_key="accounts.id", nullable=False)
+    razorpay_order_id: str = Field(nullable=False, unique=True)
+    razorpay_payment_id: Optional[str] = Field(default=None, unique=True)
+    amount_paise: int = Field(nullable=False)
+    # created -> order made, checkout not yet completed
+    # captured -> webhook confirmed, balance credited
+    # failed -> webhook reported failure, balance untouched
+    status: str = Field(default="created", nullable=False)
+    created_at: datetime = Field(
+        default_factory=utc_now,
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+    verified_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )

@@ -137,6 +137,14 @@ export function PayPage() {
         );
         void loadAccount();
       }
+      if (event.type === "topup.captured") {
+        const data = event.data as { balance_paise?: number };
+        setAccount((prev) =>
+          prev && data.balance_paise !== undefined
+            ? { ...prev, balance_paise: data.balance_paise, available_paise: data.balance_paise }
+            : prev,
+        );
+      }
       if (event.type === "circuit_breaker.acked") {
         const data = event.data as { ack_action?: string; contact_name?: string };
         const name = data.contact_name || "Your trusted contact";

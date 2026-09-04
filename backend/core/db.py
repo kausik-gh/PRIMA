@@ -20,6 +20,7 @@ from backend.core.models import (  # noqa: F401
     ContextFlag,
     Event,
     PatternSignature,
+    RazorpayTopup,
     RiskDecision,
     ScopedHold,
     Transaction,

@@ -200,4 +200,14 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ account_ids, fraud_type }),
     }),
+  razorpayOrder: (account_id: string, amount_paise: number) =>
+    request<{
+      order_id: string;
+      amount_paise: number;
+      key_id: string;
+      account_handle: string;
+    }>("/api/razorpay/order", {
+      method: "POST",
+      body: JSON.stringify({ account_id, amount_paise }),
+    }),
 };
