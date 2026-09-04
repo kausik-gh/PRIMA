@@ -54,10 +54,16 @@ export function InvestigationDrawer({
   payload,
   onClose,
   onRegulator,
+  onConfirmRing,
+  ringBusy,
+  ringNote,
 }: {
   payload: InvestigatePayload;
   onClose: () => void;
   onRegulator: () => void;
+  onConfirmRing?: () => void;
+  ringBusy?: boolean;
+  ringNote?: string | null;
 }) {
   const ctxRules = payload.rules_fired.filter((rule) =>
     ["secrecy", "fear", "urgency", "greed", "bypass_approval"].includes(String(rule.code || "")),
@@ -126,6 +132,17 @@ export function InvestigationDrawer({
             Mark reviewed
           </button>
         ) : null}
+        {onConfirmRing ? (
+          <button
+            className="btn"
+            type="button"
+            disabled={ringBusy}
+            onClick={onConfirmRing}
+          >
+            Confirm ring
+          </button>
+        ) : null}
+        {ringNote ? <p className="muted">{ringNote}</p> : null}
         <button className="btn btn-ghost" type="button" onClick={onRegulator}>
           Download regulator record
         </button>

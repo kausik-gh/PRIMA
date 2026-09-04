@@ -6,11 +6,13 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from sqlmodel import Session
 
 from backend.core.db import get_session
 from backend.core.models import RiskDecision
 from backend.routes.console_queries import (
+    confirm_ring,
     graph_payload,
     investigate_payload,
     list_decisions,
@@ -74,6 +76,22 @@ def console_regulator(decision_id: str, session: Session = Depends(get_session))
     if row is None:
         return _error(404, "unknown_decision", "No decision with that id.")
     return row.regulator_record
+
+
+class ConfirmRingBody(BaseModel):
+    account_ids: list[str]
+    fraud_type: str = "fan_in_ring"
+
+
+@router.post("/api/console/rings/confirm")
+def console_confirm_ring(body: ConfirmRingBody, session: Session = Depends(get_session)):
+    if not body.account_ids:
+        return _error(400, "empty_ring", "account_ids must not be empty.")
+    try:
+        return confirm_ring(session, body.account_ids, body.fraud_type)
+    except ValueError as exc:
+        code, _, detail = str(exc).partition(":")
+        return _error(404, code, f"No account with id {detail}.")
 
 
 @router.get("/api/metrics/ps3")

@@ -49,6 +49,8 @@ export function ConsolePage() {
   const [drawer, setDrawer] = useState<InvestigatePayload | null>(null);
   const [drawerDecisionId, setDrawerDecisionId] = useState<string | null>(null);
   const [wsOk, setWsOk] = useState(false);
+  const [ringBusy, setRingBusy] = useState(false);
+  const [ringNote, setRingNote] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     const [graph, rail, strip] = await Promise.all([
@@ -163,6 +165,28 @@ export function ConsolePage() {
     URL.revokeObjectURL(url);
   };
 
+  const confirmRing = async () => {
+    if (!drawer) {
+      return;
+    }
+    const ids = Array.from(
+      new Set([drawer.account.id, ...drawer.neighbours.map((row) => row.id)]),
+    );
+    setRingBusy(true);
+    try {
+      const result = await api.confirmRing(ids);
+      setRingNote(
+        `Held ${result.opened_holds.length} of ${result.accounts_in_ring} accounts in this ring.`,
+      );
+      await refresh();
+      await openAccount(drawer.account.id, drawerDecisionId || undefined);
+    } catch (err) {
+      setRingNote(err instanceof Error ? err.message : "Could not confirm this ring.");
+    } finally {
+      setRingBusy(false);
+    }
+  };
+
   return (
     <>
       <div className="console-context">
@@ -204,8 +228,14 @@ export function ConsolePage() {
         {drawer ? (
           <InvestigationDrawer
             payload={drawer}
-            onClose={() => setDrawer(null)}
+            onClose={() => {
+              setDrawer(null);
+              setRingNote(null);
+            }}
             onRegulator={() => void downloadRegulator()}
+            onConfirmRing={() => void confirmRing()}
+            ringBusy={ringBusy}
+            ringNote={ringNote}
           />
         ) : null}
       </div>

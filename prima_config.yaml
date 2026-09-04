@@ -21,7 +21,8 @@ ringwatch:
 trailscore:
   window_minutes: 15
   weights: { login_new_device: 0.20, credential_changed: 0.22, payee_added: 0.15,
-             limit_raised: 0.20, full_balance_amount: 0.20, screen_share_active: 0.25 }
+             limit_raised: 0.20, full_balance_amount: 0.20, screen_share_active: 0.25,
+             lookout_dismissed: 0.25 }
   ordered_bonus: 0.25
   unordered_bonus: 0.10
 

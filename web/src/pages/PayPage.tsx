@@ -49,6 +49,7 @@ export function PayPage() {
   const [tick, setTick] = useState(0);
   const [contactLine, setContactLine] = useState<string | null>(null);
   const [payMissing, setPayMissing] = useState(false);
+  const [lookout, setLookout] = useState<string | null>(null);
   const committed = useRef(false);
 
   const loadAccount = useCallback(async () => {
@@ -74,6 +75,25 @@ export function PayPage() {
   useEffect(() => {
     void loadAccount();
   }, [loadAccount]);
+
+  // Lookout: factual pre-amount check. Silent unless RingWatch is above the
+  // tier-0 boundary. Never a positive "this payee is fine" label.
+  useEffect(() => {
+    const target = payee.trim();
+    if (!target) {
+      setLookout(null);
+      return;
+    }
+    const id = window.setTimeout(() => {
+      void api
+        .beneficiaryCheck(target)
+        .then((row) => {
+          setLookout(row.flag === "watch" && row.user_reason ? row.user_reason : null);
+        })
+        .catch(() => setLookout(null));
+    }, 400);
+    return () => window.clearTimeout(id);
+  }, [payee]);
 
   useEffect(() => {
     const id = window.setInterval(() => setTick((n) => n + 1), 1000);
@@ -167,6 +187,9 @@ export function PayPage() {
     }
     setBusy(true);
     try {
+      if (lookout && account?.account_id) {
+        await api.beneficiaryDismiss(account.account_id, payee.trim());
+      }
       const result = await api.quote({
         sender_handle: handle,
         beneficiary_handle: payee.trim(),
@@ -322,6 +345,7 @@ export function PayPage() {
                 onChange={(e) => setPayee(e.target.value)}
                 autoComplete="off"
               />
+              {lookout ? <p className="lookout-note">{lookout}</p> : null}
               {fieldError ? <div className="field-error">{fieldError}</div> : null}
             </div>
             <div className="field">

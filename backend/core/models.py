@@ -86,7 +86,9 @@ class Event(SQLModel, table=True):
     account_id: str = Field(foreign_key="accounts.id", nullable=False)
     # Allowed: login_new_device | credential_changed | payee_added |
     # limit_raised | screen_share_active | note_entered | call_context |
-    # transfer_attempted.
+    # transfer_attempted | staged_attack_armed (ops-only marker, never
+    # read by scorers — see payer.py's is_seeded_attack tagging) |
+    # lookout_dismissed (payer Lookout, weighted by TrailScore).
     event_type: str = Field(nullable=False)
     payload: Optional[dict[str, Any]] = Field(
         default=None,

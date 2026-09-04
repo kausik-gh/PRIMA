@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
-from backend.action.decision_stub import evaluate
+from backend.action.decision_stub import _age_days, evaluate
 from backend.action.payer_breaker import maybe_fire_for_tier4
 from backend.action.payer_ledger import (
     account_by_handle,
@@ -40,6 +40,7 @@ from backend.core.models import (
     Transaction,
     utc_now,
 )
+from backend.scoring.ringwatch import ringwatch_score
 from backend.routes.console_queries import (
     decision_item,
     graph_link_for_tx,
@@ -130,6 +131,22 @@ async def quote(body: QuoteBody, session: Session = Depends(get_session)):
         return _error(400, "insufficient_available", "Amount is more than currently available.")
 
     now = utc_now()
+    # is_seeded_attack: set when the sender was armed by /api/ops/inject_sequence
+    # within the last 30 minutes — a durable event marker (event_type=
+    # 'staged_attack_armed'), not a new column; scorers never read this,
+    # only ps3_metrics' prevented-loss calculation does. Without this, a
+    # judge's real Act 3 payment was never distinguishable from an ordinary
+    # one, so prevented_loss_paise stayed 0 even after a real tier-4 catch.
+    armed_cutoff = _aware(now) - timedelta(minutes=30)
+    armed = False
+    for row in session.exec(
+        select(Event)
+        .where(Event.account_id == sender.id)
+        .where(Event.event_type == "staged_attack_armed")
+    ).all():
+        if _aware(row.ts) >= armed_cutoff:
+            armed = True
+            break
     tx = Transaction(
         id="tx_" + uuid.uuid4().hex,
         sender_id=sender.id,
@@ -139,6 +156,7 @@ async def quote(body: QuoteBody, session: Session = Depends(get_session)):
         note=body.note,
         status="quoted",
         attempted_at=now,
+        is_seeded_attack=armed,
     )
     session.add(tx)
     session.flush()
@@ -413,3 +431,76 @@ def account(handle: str, session: Session = Depends(get_session)):
             for row in holds
         ],
     }
+
+
+_LOOKOUT_THRESHOLD = 0.15  # matches the ladder's own tier-0 boundary
+
+
+def _lookout_facts(beneficiary: Account, result) -> list[str]:
+    """Built ONLY from genuinely computed values (RingWatch's own feature
+    read + the account's real created_at) — deliberately does not reuse
+    decision_stub.py's beneficiary_age_days/unique_senders_today fallback,
+    which hardcodes numbers keyed on the literal string "quickcash" in the
+    handle. That shortcut is fine for the scripted ladder facts on the one
+    named demo account; Lookout runs before an amount is even entered and
+    must hold up for whichever account a judge actually picks.
+    """
+    facts: list[str] = []
+    age_days = _age_days(beneficiary.created_at)
+    facts.append(f"Account opened {age_days} days ago.")
+    for rule in result.rules_fired:
+        detail = str(rule.get("detail", ""))
+        if detail.startswith("in_degree="):
+            count = detail.split("=", 1)[1]
+            facts.append(f"{count} different accounts have paid it recently.")
+            break
+    return facts[:2]
+
+
+@router.get("/beneficiary-check")
+def beneficiary_check(to_handle: str, session: Session = Depends(get_session)):
+    """Pre-amount check, fired the moment a beneficiary is selected — not
+    at commit time. Silent by default (flag: null) on purpose: this never
+    returns a positive "valid"/"trusted" label, only ever a factual concern
+    or nothing. A positive score is exactly what a patient fraudster would
+    farm toward; silence can't be farmed.
+    """
+    beneficiary = account_by_handle(session, to_handle)
+    if beneficiary is None:
+        return _error(404, "unknown_handle", "No account with that handle in the demo ledger.")
+    result = ringwatch_score(beneficiary.id, session)
+    if result.score < _LOOKOUT_THRESHOLD:
+        return {"flag": None}
+    facts = _lookout_facts(beneficiary, result)
+    reason = " ".join(facts)
+    padded = facts + [""] * (3 - len(facts))
+    assert_user_reason_safe({"headline": reason, "counterfactual": "", "facts": padded})
+    return {"flag": "watch", "user_reason": reason}
+
+
+class LookoutDismissBody(BaseModel):
+    account_id: str
+    to_handle: str
+
+
+@router.post("/beneficiary-check/dismiss")
+def beneficiary_check_dismiss(body: LookoutDismissBody, session: Session = Depends(get_session)):
+    """Records that a Lookout warning was shown and the payer went ahead
+    anyway. This event feeds back into TrailScore's own sequence scoring —
+    dismissing an explicit warning right before a large transfer is itself
+    part of the sequence the next quote/commit will read.
+    """
+    acct = session.get(Account, body.account_id)
+    if acct is None:
+        return _error(404, "unknown_account", "No account with that id.")
+    row = Event(
+        id="ev_" + uuid.uuid4().hex,
+        account_id=acct.id,
+        event_type="lookout_dismissed",
+        payload={"to_handle": body.to_handle},
+        ts=utc_now(),
+        ingest_source="payer",
+    )
+    session.add(row)
+    session.commit()
+    return {"ok": True}

@@ -748,6 +748,15 @@ a:focus-visible {
   line-height: 1.45;
 }
 
+.lookout-note {
+  margin: var(--s2) 0 0;
+  padding-left: var(--s3);
+  border-left: 2px solid var(--steel);
+  color: var(--ink);
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
 .ops-hint {
   font-size: 0.8125rem;
   color: var(--graphite);

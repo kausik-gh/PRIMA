@@ -260,6 +260,19 @@ def ops_inject(body: InjectBody, session: Session = Depends(get_session)):
         )
         session.add(row)
         written.append({"event_type": event_type, "ts": iso(row.ts)})
+    # Arm this account for is_seeded_attack tagging — see payer.py's quote
+    # handler. Re-armed to "now" each call, same 30-minute window rearm
+    # uses for the canonical chain, so re-injecting also re-arms cleanly.
+    session.add(
+        Event(
+            id="ev_" + uuid.uuid4().hex,
+            account_id=acct.id,
+            event_type="staged_attack_armed",
+            payload={},
+            ts=now,
+            ingest_source="ops",
+        )
+    )
     session.commit()
     return {"ok": True, "scenario": body.scenario, "events": written}
 
@@ -305,6 +318,20 @@ def ops_rearm(body: RearmBody, session: Session = Depends(get_session)):
         context_row.ts = now - timedelta(minutes=1)
         session.add(context_row)
         rearmed.append({"event_type": "call_context", "ts": iso(context_row.ts)})
+
+    # Refresh the is_seeded_attack arming window too — rearm is pressed
+    # right before the judge actually pays, so this is the more reliable
+    # place to guarantee the window is fresh, not just inject_sequence.
+    session.add(
+        Event(
+            id="ev_" + uuid.uuid4().hex,
+            account_id=acct.id,
+            event_type="staged_attack_armed",
+            payload={},
+            ts=now,
+            ingest_source="ops",
+        )
+    )
     session.commit()
     return {"ok": True, "rearmed": rearmed}
 

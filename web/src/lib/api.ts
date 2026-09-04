@@ -176,4 +176,28 @@ export const api = {
         body: JSON.stringify({ account_id }),
       },
     ),
+  beneficiaryCheck: (to_handle: string) =>
+    request<{ flag: "watch" | null; user_reason?: string }>(
+      `/api/payer/beneficiary-check?to_handle=${encodeURIComponent(to_handle)}`,
+    ),
+  beneficiaryDismiss: (account_id: string, to_handle: string) =>
+    request<{ ok: boolean }>("/api/payer/beneficiary-check/dismiss", {
+      method: "POST",
+      body: JSON.stringify({ account_id, to_handle }),
+    }),
+  confirmRing: (account_ids: string[], fraud_type = "fan_in_ring") =>
+    request<{
+      ok: boolean;
+      pattern_id: string;
+      accounts_in_ring: number;
+      opened_holds: Array<{
+        account: string;
+        transaction_id: string;
+        held_paise: number;
+        reason_ref: string;
+      }>;
+    }>("/api/console/rings/confirm", {
+      method: "POST",
+      body: JSON.stringify({ account_ids, fraud_type }),
+    }),
 };

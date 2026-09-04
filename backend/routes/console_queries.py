@@ -6,13 +6,15 @@ Inbound is never held. There is no freeze-account helper here.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from statistics import median
 from typing import Any
+import uuid
 
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from backend.action.payer_ledger import active_hold_rows, available_paise, iso
+from backend.action.scoped_hold import COOLING_MINUTES, next_reason_ref
 from backend.core.config import get_config
 from backend.core.decision import _verdict_from_fused, fuse, ladder_tier
 from backend.core.models import (
@@ -25,6 +27,7 @@ from backend.core.models import (
     Transaction,
     utc_now,
 )
+from backend.graph.taint import mark_fraudulent
 from backend.scoring.contextflag import contextflag_score
 from backend.scoring.ringwatch import ringwatch_score
 from backend.scoring.trailscore import trailscore_score
@@ -457,4 +460,86 @@ def console_snapshot(session: Session) -> dict[str, Any]:
     return {
         "graph": graph_payload(session, window=500, bank="ALL"),
         "decisions": list_decisions(session, limit=100)["items"],
+    }
+
+
+def confirm_ring(
+    session: Session, account_ids: list[str], fraud_type: str
+) -> dict[str, Any]:
+    """Analyst confirms a subgraph as a ring. Writes one pattern_signatures
+    row for future PatternMemory similarity, and opens a ScopedHold on each
+    account's most recent settled inbound transaction — never on the
+    account itself. Reuses mark_fraudulent (Act 5's already-proven taint
+    path) per account rather than inventing a second hold-amount rule, so
+    the traced amount is computed the same way everywhere in the system.
+
+    hops=1 per call: this taints only that one origin transaction and its
+    immediate children, so confirming several accounts in one ring doesn't
+    each re-chase the whole graph — each account's own inbound transaction
+    is the origin for its own hold.
+    """
+    accounts: list[Account] = []
+    for account_id in account_ids:
+        acct = session.get(Account, account_id)
+        if acct is None:
+            raise ValueError(f"unknown_account:{account_id}")
+        accounts.append(acct)
+
+    signature = PatternSignature(
+        label=fraud_type,
+        signature={
+            "account_ids": account_ids,
+            "node_count": len(account_ids),
+            "confirmed_by": "analyst",
+            "confirmed_at": iso(utc_now()),
+        },
+    )
+    session.add(signature)
+    session.flush()
+
+    opened_holds: list[dict[str, Any]] = []
+    for acct in accounts:
+        tx = session.exec(
+            select(Transaction)
+            .where(Transaction.receiver_id == acct.id)
+            .where(Transaction.status == "settled")
+            .order_by(col(Transaction.attempted_at).desc())
+        ).first()
+        if tx is None:
+            continue
+        try:
+            result = mark_fraudulent(tx.id, hops=1, session=session)
+        except ValueError:
+            continue
+        origin_hop = next((hop for hop in result.hops if hop.tx_id == tx.id), None)
+        if origin_hop is None or origin_hop.taint_ratio <= 0:
+            continue
+        traced_paise = int(tx.amount_paise * origin_hop.taint_ratio)
+        if traced_paise <= 0:
+            continue
+        hold = ScopedHold(
+            id="sh_" + uuid.uuid4().hex,
+            transaction_id=tx.id,
+            account_id=acct.id,
+            held_paise=traced_paise,
+            reason_ref=next_reason_ref(),
+            opened_at=utc_now(),
+            releases_at=utc_now() + timedelta(minutes=COOLING_MINUTES),
+        )
+        session.add(hold)
+        opened_holds.append(
+            {
+                "account": acct.handle,
+                "transaction_id": tx.id,
+                "held_paise": traced_paise,
+                "reason_ref": hold.reason_ref,
+            }
+        )
+
+    session.commit()
+    return {
+        "ok": True,
+        "pattern_id": signature.id,
+        "accounts_in_ring": len(accounts),
+        "opened_holds": opened_holds,
     }

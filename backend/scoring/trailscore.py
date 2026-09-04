@@ -15,6 +15,7 @@ _WEIGHTED_STEPS: tuple[str, ...] = (
     "payee_added",
     "limit_raised",
     "screen_share_active",
+    "lookout_dismissed",
 )
 
 _CANONICAL_STEPS: tuple[str, ...] = (
@@ -32,6 +33,9 @@ _DEFAULT_WEIGHTS: dict[str, float] = {
     "limit_raised": 0.20,
     "full_balance_amount": 0.20,
     "screen_share_active": 0.25,
+    # Dismissing an explicit Lookout warning right before committing is
+    # itself a sequence signal — see payer.py's beneficiary_check_dismiss.
+    "lookout_dismissed": 0.25,
 }
 
 
@@ -68,7 +72,7 @@ def trailscore_score(
 
     fired_rules: list[dict] = []
     raw = 0.0
-    for step in (*_WEIGHTED_STEPS[:4], "full_balance_amount", "screen_share_active"):
+    for step in (*_WEIGHTED_STEPS[:4], "full_balance_amount", "screen_share_active", "lookout_dismissed"):
         if step not in present_weighted:
             continue
         points = float(weights[step])
