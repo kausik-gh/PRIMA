@@ -23,7 +23,10 @@ from backend.action.payer_ledger import (
     active_hold_rows,
     available_paise,
     iso,
+    minutes_since_limit_raised,
+    minutes_since_new_device,
     prior_payments,
+    retention_minutes_typical,
     trusted_contact,
     unique_senders_today,
 )
@@ -169,6 +172,9 @@ async def quote(body: QuoteBody, session: Session = Depends(get_session)):
         prior_payments=prior_payments(session, sender.id, beneficiary.id),
         config_version=get_config_version(),
         unique_senders_today=unique_senders_today(session, beneficiary.id),
+        retention_minutes_typical=retention_minutes_typical(session, beneficiary.id),
+        minutes_since_limit_raised=minutes_since_limit_raised(session, sender.id),
+        minutes_since_new_device=minutes_since_new_device(session, sender.id),
     )
     decision_id = "d_" + uuid.uuid4().hex
     quote_at_iso = iso(now)

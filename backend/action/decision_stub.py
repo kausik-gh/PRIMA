@@ -97,6 +97,9 @@ def evaluate(
     prior_payments: int = 0,
     config_version: str = "1.0.0-stub",
     unique_senders_today: int | None = None,
+    retention_minutes_typical: int | None = None,
+    minutes_since_limit_raised: int | None = None,
+    minutes_since_new_device: int | None = None,
 ) -> dict[str, Any]:
     """Return a reasonline-ready decision body (without id / quote_at / reasons)."""
     if isinstance(amount_paise, bool) or not isinstance(amount_paise, int):
@@ -104,10 +107,10 @@ def evaluate(
     bene_age = _age_days(beneficiary.created_at)
     meta = {
         "beneficiary_age_days": bene_age,
-        "unique_senders_today": unique_senders_today if unique_senders_today is not None else (14 if "quickcash" in beneficiary.handle else 1),
-        "retention_minutes_typical": 12 if "quickcash" in beneficiary.handle else 240,
-        "minutes_since_limit_raised": 8,
-        "minutes_since_new_device": 15,
+        "unique_senders_today": unique_senders_today if unique_senders_today is not None else 1,
+        "retention_minutes_typical": retention_minutes_typical,
+        "minutes_since_limit_raised": minutes_since_limit_raised,
+        "minutes_since_new_device": minutes_since_new_device,
         "prior_payments_to_beneficiary": int(prior_payments),
         "fusion_weights": dict(_DEFAULT_WEIGHTS),
         "model_sha256": {
@@ -123,8 +126,11 @@ def evaluate(
         real["config_version"] = config_version
         return real
 
+    # Fixture / synthetic branches below are unreachable while real scoring
+    # imports succeed. Per-handle shortcuts were removed from this fallback
+    # too so they cannot be copy-pasted back to life.
     note_s = note or ""
-    force_tier4 = ("quickcash" in beneficiary.handle) or (len(note_s.strip()) >= 20)
+    force_tier4 = len(note_s.strip()) >= 20
     if force_tier4:
         fixture = _load_tier4_fixture()
         body = deepcopy(fixture)
@@ -136,9 +142,6 @@ def evaluate(
         body["config_version"] = config_version
         body_meta = dict(body.get("meta") or {})
         body_meta.update(meta)
-        if "quickcash" in beneficiary.handle:
-            body_meta["beneficiary_age_days"] = max(bene_age, 6)
-            body_meta["unique_senders_today"] = 14
         body_meta["prior_payments_to_beneficiary"] = int(prior_payments)
         body["meta"] = body_meta
         body["tier"] = 4
