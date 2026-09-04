@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { DecisionItem } from "../types";
+import { Caption } from "./Caption";
 import { tierColor } from "./Chrome";
 
 export function QuadrantPanel({ items }: { items: DecisionItem[] }) {
@@ -15,6 +16,10 @@ export function QuadrantPanel({ items }: { items: DecisionItem[] }) {
   );
   return (
     <section className="quadrant">
+      <Caption>
+        Where risk actually lives: a clean-looking payee paired with a compromised
+        sender is the case a blocklist can't catch — that's the highlighted corner.
+      </Caption>
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--graphite)" }}>
         <span>Sender state risk</span>
         <span>Compromised sender, clean-looking payee — registries miss this</span>

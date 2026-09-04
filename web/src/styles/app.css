@@ -369,10 +369,21 @@ a:focus-visible {
   border-bottom: 1px solid var(--hairline);
 }
 
+.console-context .caption {
+  margin-top: 2px;
+}
+
+.caption {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--graphite);
+  line-height: 1.45;
+}
+
 .console {
   display: grid;
   grid-template-columns: 1fr 380px;
-  grid-template-rows: 72px 1fr 160px;
+  grid-template-rows: auto 1fr auto;
   flex: 1;
   min-height: 0;
   height: auto;
@@ -432,6 +443,10 @@ a:focus-visible {
 .metric .label {
   font-size: 0.8125rem;
   color: var(--graphite);
+}
+
+.metric .caption {
+  margin-top: var(--s1);
 }
 
 .stage {
@@ -502,6 +517,10 @@ a:focus-visible {
   position: relative;
 }
 
+.quadrant .caption {
+  margin-bottom: var(--s2);
+}
+
 .quadrant canvas,
 .quadrant .plot {
   width: 100%;
@@ -567,6 +586,10 @@ a:focus-visible {
   border: 1px solid var(--hairline);
   padding: var(--s4);
   border-radius: 0;
+}
+
+.ops-card > .caption {
+  margin: 0 0 var(--s3);
 }
 
 .ops .btn,

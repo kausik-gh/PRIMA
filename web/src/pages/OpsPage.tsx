@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { Link } from "react-router-dom";
+import { Caption } from "../components/Caption";
 import { api, ApiError } from "../lib/api";
 import { rememberGuest } from "../lib/guests";
 import { rememberWatchToken } from "../lib/watchLink";
@@ -268,6 +269,7 @@ export function OpsPage() {
       <div className="ops-grid">
         <section className="ops-card">
           <h2>health</h2>
+          <Caption>Is the backend actually up and scoring.</Caption>
           {health ? (
             <ul className="facts">
               <li className={health.db_ok ? "health-ok" : "health-bad"}>
@@ -289,6 +291,7 @@ export function OpsPage() {
 
         <section className="ops-card">
           <h2>seed / reset</h2>
+          <Caption>Wipes and regenerates all 500 demo accounts.</Caption>
           <button className="btn" type="button" disabled={busy} onClick={doSeed}>
             seed 500 / 21d
           </button>
@@ -324,6 +327,7 @@ export function OpsPage() {
 
         <section className="ops-card">
           <h2>provision guest</h2>
+          <Caption>Creates a real account for a judge and a QR to reach it.</Caption>
           <form onSubmit={onGuest}>
             <input value={guestName} onChange={(e) => setGuestName(e.target.value)} />
             <button className="btn" type="submit" disabled={busy} style={{ marginTop: 8 }}>
@@ -343,6 +347,10 @@ export function OpsPage() {
 
         <section className="ops-card">
           <h2>act 3 inject</h2>
+          <Caption>
+            Writes a real event sequence onto an account — a login, a payee added, a
+            limit raised — as if it just happened.
+          </Caption>
           <select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
             {named.map((row) => (
               <option key={row.id} value={row.id}>
@@ -397,6 +405,10 @@ export function OpsPage() {
 
         <section className="ops-card">
           <h2>circuit breaker</h2>
+          <Caption>
+            Manually fires the trusted-contact alert, for when you want to show it
+            without waiting for a real tier-4 payment.
+          </Caption>
           <input value={watchToken} onChange={(e) => setWatchToken(e.target.value)} />
           <button
             className="btn"
@@ -431,6 +443,9 @@ export function OpsPage() {
 
         <section className="ops-card">
           <h2>event form</h2>
+          <Caption>
+            Writes one raw event by hand, for anything the other tiles don't cover.
+          </Caption>
           <select value={eventType} onChange={(e) => setEventType(e.target.value)}>
             {EVENT_TYPES.map((item) => (
               <option key={item} value={item}>
@@ -451,6 +466,7 @@ export function OpsPage() {
 
         <section className="ops-card">
           <h2>report</h2>
+          <Caption>Marks a real transaction as fraud and traces where the money went.</Caption>
           <input
             placeholder="transaction_id"
             value={txId}

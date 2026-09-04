@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Caption } from "../components/Caption";
 import { DecisionRail } from "../components/DecisionRail";
 import { InvestigationDrawer } from "../components/InvestigationDrawer";
 import { MetricStrip } from "../components/MetricStrip";
@@ -25,11 +26,28 @@ const STAGE_HANDLES = new Set([
 ]);
 
 function thinGraph(nodes: GraphNode[], links: GraphLink[], maxLinks = 160) {
-  const keptLinks = links.slice(0, maxLinks);
+  const linkNode = (value: string | GraphNode) =>
+    typeof value === "string" ? value : value.id;
+  const idToHandle = new Map(nodes.map((n) => [n.id, n.handle]));
+  const isStage = (link: GraphLink) =>
+    STAGE_HANDLES.has(idToHandle.get(linkNode(link.source)) || "") ||
+    STAGE_HANDLES.has(idToHandle.get(linkNode(link.target)) || "");
+
+  // Priority: named demo accounts, then taint > 0, then original recency.
+  // Ambient traffic must not crowd out the structures the demo is about.
+  const priority = [...links].sort((a, b) => {
+    const stageDiff = Number(isStage(b)) - Number(isStage(a));
+    if (stageDiff !== 0) return stageDiff;
+    const taintDiff = (b.taint || 0) - (a.taint || 0);
+    if (taintDiff !== 0) return taintDiff;
+    return 0;
+  });
+
+  const keptLinks = priority.slice(0, maxLinks);
   const ids = new Set<string>();
   for (const link of keptLinks) {
-    ids.add(typeof link.source === "string" ? link.source : link.source.id);
-    ids.add(typeof link.target === "string" ? link.target : link.target.id);
+    ids.add(linkNode(link.source));
+    ids.add(linkNode(link.target));
   }
   const keptNodes = nodes.filter(
     (node) => ids.has(node.id) || STAGE_HANDLES.has(node.handle),
@@ -191,6 +209,9 @@ export function ConsolePage() {
     <>
       <div className="console-context">
         Every payment attempt, scored live. Click a node to see why.
+        <Caption>
+          Colour is risk tier. Node size is how many payments touch that account.
+        </Caption>
       </div>
       <div className="console">
         <MetricStrip metrics={metrics} />
