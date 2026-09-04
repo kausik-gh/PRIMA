@@ -164,4 +164,8 @@ export const api = {
       body: JSON.stringify({ transaction_id }),
     }),
   reset: () => request<{ ok: boolean }>("/api/ops/reset", { method: "POST" }),
+  ambientStart: () =>
+    request<{ ok: boolean; running: boolean }>("/api/ops/ambient/start", { method: "POST" }),
+  ambientStop: () =>
+    request<{ ok: boolean; running: boolean }>("/api/ops/ambient/stop", { method: "POST" }),
 };

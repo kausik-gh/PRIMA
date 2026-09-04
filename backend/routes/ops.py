@@ -27,6 +27,7 @@ from backend.core.models import (
 )
 from backend.routes.console_queries import graph_node
 from backend.routes.ws import envelope, hub
+from backend.sim import ambient
 from backend.sim.seed import seed_database, wipe_database
 
 router = APIRouter(prefix="/api/ops", tags=["ops"])
@@ -274,12 +275,31 @@ def ops_nominate(body: NominateBody, request: Request, session: Session = Depend
 
 
 @router.post("/reset")
-def ops_reset():
+async def ops_reset():
+    # Stop ambient traffic first — a reseed against pre-reset account ids would
+    # otherwise crash or silently no-op mid-run.
+    await ambient.stop()
     wipe_database()
     cb.SESSIONS.clear()
     cb.BREAKER_LOG.clear()
     ensure_payer_seed()
     return {"ok": True}
+
+
+@router.post("/ambient/start")
+async def ops_ambient_start():
+    """Begin low-stakes real background traffic between ordinary seeded accounts.
+
+    Idempotent: calling it while already running just confirms running:true.
+    """
+    ambient.start()
+    return {"ok": True, "running": ambient.is_running()}
+
+
+@router.post("/ambient/stop")
+async def ops_ambient_stop():
+    await ambient.stop()
+    return {"ok": True, "running": ambient.is_running()}
 
 
 NAMED_HANDLES = frozenset(
@@ -339,6 +359,7 @@ def ops_health(session: Session = Depends(get_session)):
         "gnn_model_loaded": (_REPO_ROOT / "gnn_model.pth").is_file(),
         "ws_clients": hub.client_count(),
         "last_decision_at": latest,
+        "ambient_running": ambient.is_running(),
     }
 
 

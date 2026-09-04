@@ -1,7 +1,9 @@
 import { FormEvent, useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
+import { Link } from "react-router-dom";
 import { api, ApiError } from "../lib/api";
 import { rememberGuest } from "../lib/guests";
+import { rememberWatchToken } from "../lib/watchLink";
 import type { GraphNode, Health } from "../types";
 
 type GuestCard = {
@@ -44,9 +46,19 @@ export function OpsPage() {
   const [log, setLog] = useState<string>("");
   const [busy, setBusy] = useState(false);
 
+  // Guided-run progress. Purely visual — every tile below stays clickable in
+  // any order. This is a checklist, not a wizard.
+  const [guideOpen, setGuideOpen] = useState(true);
+  const [seeded, setSeeded] = useState(false);
+  const [provisioned, setProvisioned] = useState(false);
+  const [injected, setInjected] = useState(false);
+  const [liveWatchToken, setLiveWatchToken] = useState<string | null>(null);
+  const [ambientRunning, setAmbientRunning] = useState(false);
+
   const refresh = async () => {
     const [h, graph] = await Promise.all([api.health(), api.graph(500)]);
     setHealth(h);
+    setAmbientRunning(Boolean(h.ambient_running));
     const rows = graph.nodes
       .filter((node: GraphNode) => STAGE.has(node.handle))
       .map((node) => ({ id: node.id, handle: node.handle }));
@@ -61,11 +73,16 @@ export function OpsPage() {
     void refresh().catch((err) => setLog(String(err)));
   }, []);
 
-  const run = async (label: string, fn: () => Promise<unknown>) => {
+  const run = async (
+    label: string,
+    fn: () => Promise<unknown>,
+    onOk?: (result: unknown) => void,
+  ) => {
     setBusy(true);
     try {
       const result = await fn();
       setLog(`${label}: ${JSON.stringify(result)}`);
+      onOk?.(result);
       await refresh();
     } catch (err) {
       const message =
@@ -76,25 +93,152 @@ export function OpsPage() {
     }
   };
 
+  const provisionGuest = async () => {
+    await run(
+      "guest",
+      async () => {
+        const created = await api.guest(guestName);
+        rememberGuest(created.account_id);
+        const origin = window.location.origin;
+        const card = {
+          ...created,
+          pay_url: `${origin}/pay?as=${encodeURIComponent(created.handle)}`,
+        };
+        setGuests((rows) => [card, ...rows]);
+        return created;
+      },
+      () => setProvisioned(true),
+    );
+  };
+
   const onGuest = async (event: FormEvent) => {
     event.preventDefault();
-    await run("guest", async () => {
-      const created = await api.guest(guestName);
-      rememberGuest(created.account_id);
-      const origin = window.location.origin;
-      const card = {
-        ...created,
-        pay_url: `${origin}/pay?as=${encodeURIComponent(created.handle)}`,
-      };
-      setGuests((rows) => [card, ...rows]);
-      return created;
-    });
+    await provisionGuest();
   };
+
+  const doSeed = () => run("seed", () => api.seed(500, 21), () => setSeeded(true));
+
+  const doInject = () =>
+    run("inject", () => api.inject(accountId), () => setInjected(true));
+
+  const doNominate = () =>
+    run(
+      "nominate",
+      () => api.nominate(accountId, contactName),
+      (result) => {
+        const token = (result as { watch_token?: string }).watch_token;
+        if (token) {
+          setLiveWatchToken(token);
+          setWatchToken(token);
+          rememberWatchToken(token);
+        }
+      },
+    );
+
+  const toggleAmbient = () =>
+    run("ambient", () => (ambientRunning ? api.ambientStop() : api.ambientStart()));
+
+  const step = (n: number, done: boolean, label: string) => (
+    <div className={done ? "guide-row done" : "guide-row"}>
+      <span className="guide-dot" aria-hidden>
+        {done ? "●" : "○"}
+      </span>
+      <span className="guide-num">{n}</span>
+      <span className="guide-label">{label}</span>
+    </div>
+  );
 
   return (
     <div className="ops">
       <h1>PRIMA ops</h1>
-      <p>Demo ledger control. Not the product surface.</p>
+      <p className="ops-context">
+        Backstage controls — not shown to judges. Sets up real data the console and pay
+        screens read from.
+      </p>
+
+      <section className="ops-card guide">
+        <div className="guide-head">
+          <h2>Guided run</h2>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => setGuideOpen((v) => !v)}
+          >
+            {guideOpen ? "Collapse" : "Expand"}
+          </button>
+        </div>
+        {guideOpen ? (
+          <>
+            <p className="guide-intro">
+              This is the order a live demo run follows. Nothing here is required in order —
+              it's a checklist, not a wizard.
+            </p>
+            <ol className="guide-list">
+              <li>
+                {step(1, seeded, "Seed the ledger")}
+                <button className="btn" type="button" disabled={busy} onClick={doSeed}>
+                  Seed 500 / 21d
+                </button>
+              </li>
+              <li>
+                {step(2, provisioned, "Provision a judge")}
+                <button
+                  className="btn"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void provisionGuest()}
+                >
+                  Provision guest
+                </button>
+              </li>
+              <li>
+                {step(3, injected, "Set up the scenario")}
+                <button
+                  className="btn"
+                  type="button"
+                  disabled={busy || !accountId}
+                  onClick={doInject}
+                >
+                  Inject takeover
+                </button>
+              </li>
+              <li>
+                {step(4, Boolean(liveWatchToken), "Nominate a trusted contact")}
+                <button
+                  className="btn"
+                  type="button"
+                  disabled={busy || !accountId}
+                  onClick={doNominate}
+                >
+                  Nominate {contactName}
+                </button>
+              </li>
+              <li>
+                {step(5, Boolean(liveWatchToken), "Open the watch link")}
+                {liveWatchToken ? (
+                  <Link className="guide-link" to={`/watch/${liveWatchToken}`} target="_blank">
+                    /watch/{liveWatchToken}
+                  </Link>
+                ) : (
+                  <span className="guide-link is-muted">
+                    appears once a contact is nominated
+                  </span>
+                )}
+              </li>
+              <li>
+                {step(6, false, "Open the console")}
+                <Link className="guide-link" to="/console" target="_blank">
+                  /console
+                </Link>
+              </li>
+              <li>
+                {step(7, false, "Hand the judge their QR — they pay on their phone")}
+              </li>
+            </ol>
+          </>
+        ) : null}
+      </section>
+
       <div className="ops-grid">
         <section className="ops-card">
           <h2>health</h2>
@@ -106,6 +250,7 @@ export function OpsPage() {
               <li>rf_model_loaded {String(health.rf_model_loaded)}</li>
               <li>gnn_model_loaded {String(health.gnn_model_loaded)}</li>
               <li>ws_clients {health.ws_clients}</li>
+              <li>ambient_running {String(Boolean(health.ambient_running))}</li>
               <li>last_decision_at {health.last_decision_at || "none"}</li>
             </ul>
           ) : (
@@ -118,12 +263,7 @@ export function OpsPage() {
 
         <section className="ops-card">
           <h2>seed / reset</h2>
-          <button
-            className="btn"
-            type="button"
-            disabled={busy}
-            onClick={() => void run("seed", () => api.seed(500, 21))}
-          >
+          <button className="btn" type="button" disabled={busy} onClick={doSeed}>
             seed 500 / 21d
           </button>
           <button
@@ -135,6 +275,25 @@ export function OpsPage() {
           >
             reset
           </button>
+        </section>
+
+        <section className="ops-card">
+          <h2>ambient traffic</h2>
+          <p className="ops-hint">
+            Low-stakes real transfers between anonymous seeded accounts, so the graph keeps
+            moving between acts. Never touches the named demo accounts.
+          </p>
+          <button
+            className="btn"
+            type="button"
+            disabled={busy}
+            onClick={toggleAmbient}
+          >
+            {ambientRunning ? "Stop ambient" : "Start ambient"}
+          </button>
+          <p className="facts" style={{ marginTop: 8 }}>
+            status: {ambientRunning ? "running" : "stopped"}
+          </p>
         </section>
 
         <section className="ops-card">
@@ -169,7 +328,7 @@ export function OpsPage() {
             className="btn"
             type="button"
             disabled={busy || !accountId}
-            onClick={() => void run("inject", () => api.inject(accountId))}
+            onClick={doInject}
             style={{ marginTop: 8 }}
           >
             inject takeover_isolation
@@ -222,7 +381,7 @@ export function OpsPage() {
             className="btn btn-ghost"
             type="button"
             disabled={busy || !accountId}
-            onClick={() => void run("nominate", () => api.nominate(accountId, contactName))}
+            onClick={doNominate}
             style={{ marginTop: 8 }}
           >
             nominate contact

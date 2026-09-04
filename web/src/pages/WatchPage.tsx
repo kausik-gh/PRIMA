@@ -81,6 +81,7 @@ export function WatchPage() {
       <div className="watch-idle">
         <p>You're watching for {watchingFor}.</p>
         <p>{acked ? "That's noted." : "Nothing needs you right now."}</p>
+        <p>This screen only reacts when a payment on their account needs a second opinion.</p>
         {wsError ? <p className="field-error">{wsError}</p> : null}
         <p>
           <span className={connected ? "dot" : "dot off"} />
