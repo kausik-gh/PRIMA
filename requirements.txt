@@ -8,3 +8,8 @@ python-multipart==0.0.20
 networkx==3.4.2
 pandas==2.2.3
 numpy==2.2.3
+torch==2.14.0
+torch-geometric==2.8.0.post1
+scikit-learn==1.9.0
+shap==0.51.0
+joblib==1.6.0

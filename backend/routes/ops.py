@@ -11,20 +11,24 @@ from typing import Any
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from backend.action import circuit_breaker as cb
 from backend.action.payer_ledger import iso
 from backend.action.payer_seed import ensure_payer_seed, sync_watch_sessions
+from backend.action.scoped_hold import COOLING_MINUTES, next_reason_ref
 from backend.core.config import get_config
 from backend.core.db import engine, get_session
 from backend.core.models import (
     Account,
     Event,
     RiskDecision,
+    ScopedHold,
+    Transaction,
     TrustedContact,
     utc_now,
 )
+from backend.graph.taint import mark_fraudulent
 from backend.routes.console_queries import graph_node
 from backend.routes.ws import envelope, hub
 from backend.sim import ambient
@@ -45,12 +49,48 @@ ALLOWED_EVENTS = frozenset(
     }
 )
 TAKEOVER_CHAIN = (
-    ("login_new_device", {"device_id": "ops-injected-device"}, 14),
-    ("credential_changed", {"device_id": "ops-injected-device"}, 11),
-    ("payee_added", {"source": "ops"}, 8),
-    ("limit_raised", {"source": "ops"}, 4),
+    # Previously (14, 11, 8, 4) against a 15-minute TrailScore window left
+    # under 60s margin — confirmed live to silently collapse tier 4 to
+    # tier 0 after normal setup delay. Retuned for a ~6-minute margin.
+    ("login_new_device", {"device_id": "ops-injected-device"}, 9),
+    ("credential_changed", {"device_id": "ops-injected-device"}, 7),
+    ("payee_added", {"source": "ops"}, 5),
+    ("limit_raised", {"source": "ops"}, 2),
 )
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+_RF_LOAD_CACHE: bool | None = None
+
+
+def _gnn_actually_loads() -> bool:
+    """True only if the GAT artifact both exists and imports into FraudGAT."""
+    try:
+        from backend.gnn import PYG_AVAILABLE, _load_gnn_model
+
+        if not PYG_AVAILABLE or not (_REPO_ROOT / "gnn_model.pth").is_file():
+            return False
+        _load_gnn_model(str(_REPO_ROOT / "gnn_model.pth"), "cpu")
+        return True
+    except Exception:
+        return False
+
+
+def _rf_actually_loads() -> bool:
+    """File presence is not enough — a missing sklearn/joblib used to report true."""
+    global _RF_LOAD_CACHE
+    if _RF_LOAD_CACHE is not None:
+        return _RF_LOAD_CACHE
+    path = _REPO_ROOT / "fraud_model.pkl"
+    if not path.is_file():
+        _RF_LOAD_CACHE = False
+        return False
+    try:
+        import joblib
+
+        joblib.load(path)
+        _RF_LOAD_CACHE = True
+    except Exception:
+        _RF_LOAD_CACHE = False
+    return _RF_LOAD_CACHE
 
 
 def _error(status: int, code: str, message: str) -> JSONResponse:
@@ -101,6 +141,10 @@ class EventBody(BaseModel):
 class InjectBody(BaseModel):
     account_id: str
     scenario: str
+
+
+class RearmBody(BaseModel):
+    account_id: str
 
 
 class ContextBody(BaseModel):
@@ -218,6 +262,51 @@ def ops_inject(body: InjectBody, session: Session = Depends(get_session)):
         written.append({"event_type": event_type, "ts": iso(row.ts)})
     session.commit()
     return {"ok": True, "scenario": body.scenario, "events": written}
+
+
+@router.post("/rearm_sequence")
+def ops_rearm(body: RearmBody, session: Session = Depends(get_session)):
+    """Re-stamp an already-injected scenario's events to 'now'. See the
+    TAKEOVER_CHAIN comment above for why this exists."""
+    acct = session.get(Account, body.account_id)
+    if acct is None:
+        return _error(404, "unknown_account", "No account with that id.")
+    latest_by_type: dict[str, Event] = {}
+    for event_type, _payload, _minutes in TAKEOVER_CHAIN:
+        row = session.exec(
+            select(Event)
+            .where(Event.account_id == acct.id)
+            .where(Event.event_type == event_type)
+            .order_by(col(Event.ts).desc())
+        ).first()
+        if row is not None:
+            latest_by_type[event_type] = row
+    if not latest_by_type:
+        return _error(
+            404, "no_sequence_to_rearm",
+            "No injected sequence found on this account — run inject_sequence first.",
+        )
+    now = utc_now()
+    rearmed: list[dict[str, Any]] = []
+    for event_type, _payload, minutes_ago in TAKEOVER_CHAIN:
+        row = latest_by_type.get(event_type)
+        if row is None:
+            continue
+        row.ts = now - timedelta(minutes=minutes_ago)
+        session.add(row)
+        rearmed.append({"event_type": row.event_type, "ts": iso(row.ts)})
+    context_row = session.exec(
+        select(Event)
+        .where(Event.account_id == acct.id)
+        .where(Event.event_type == "call_context")
+        .order_by(col(Event.ts).desc())
+    ).first()
+    if context_row is not None:
+        context_row.ts = now - timedelta(minutes=1)
+        session.add(context_row)
+        rearmed.append({"event_type": "call_context", "ts": iso(context_row.ts)})
+    session.commit()
+    return {"ok": True, "rearmed": rearmed}
 
 
 @router.post("/context")
@@ -355,8 +444,8 @@ def ops_health(session: Session = Depends(get_session)):
             latest = iso(rows[0].quote_at)
     return {
         "db_ok": db_ok,
-        "rf_model_loaded": (_REPO_ROOT / "fraud_model.pkl").is_file(),
-        "gnn_model_loaded": (_REPO_ROOT / "gnn_model.pth").is_file(),
+        "rf_model_loaded": _rf_actually_loads(),
+        "gnn_model_loaded": _gnn_actually_loads(),
         "ws_clients": hub.client_count(),
         "last_decision_at": latest,
         "ambient_running": ambient.is_running(),
@@ -390,9 +479,60 @@ async def ops_fire_breaker(body: FireBreakerBody):
 
 
 @router.post("/report_fraud")
-def ops_report_fraud(_body: ReportFraudBody):
-    return _error(
-        501,
-        "taint_unavailable",
-        "TaintTrace is not on this branch; fraud report cannot propagate yet.",
-    )
+def ops_report_fraud(body: ReportFraudBody, session: Session = Depends(get_session)):
+    if not body.transaction_id:
+        return _error(400, "bad_request", "transaction_id is required.")
+    try:
+        result = mark_fraudulent(body.transaction_id, hops=3, session=session)
+    except ValueError as exc:
+        return _error(400, "cannot_taint", str(exc))
+
+    # mark_fraudulent only writes taint_ratio. Act 5 still needs an amount-scoped
+    # hold on downstream receivers so an innocent merchant is not frozen.
+    TAINT_HOLD_THRESHOLD = 0.15  # matches ringwatch's taint_gate.min_ratio
+    opened_holds: list[dict[str, Any]] = []
+    for hop in result.hops:
+        if hop.hop == 0 or hop.taint_ratio < TAINT_HOLD_THRESHOLD:
+            continue
+        tx = session.get(Transaction, hop.tx_id)
+        if tx is None or tx.status != "settled":
+            continue
+        receiver = session.get(Account, hop.receiver_id)
+        if receiver is None:
+            continue
+        traced_paise = int(tx.amount_paise * hop.taint_ratio)
+        if traced_paise <= 0:
+            continue
+        hold = ScopedHold(
+            id="sh_" + uuid.uuid4().hex,
+            transaction_id=tx.id,
+            account_id=receiver.id,
+            held_paise=traced_paise,
+            reason_ref=next_reason_ref(),
+            opened_at=utc_now(),
+            releases_at=utc_now() + timedelta(minutes=COOLING_MINUTES),
+        )
+        session.add(hold)
+        opened_holds.append(
+            {
+                "account": receiver.handle,
+                "held_paise": traced_paise,
+                "reason_ref": hold.reason_ref,
+            }
+        )
+    session.commit()
+    return {
+        "ok": True,
+        "origin_tx_id": result.origin_tx_id,
+        "hops": [
+            {
+                "tx_id": h.tx_id,
+                "hop": h.hop,
+                "taint_ratio": h.taint_ratio,
+                "sender_id": h.sender_id,
+                "receiver_id": h.receiver_id,
+            }
+            for h in result.hops
+        ],
+        "opened_holds": opened_holds,
+    }

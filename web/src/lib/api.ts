@@ -168,4 +168,12 @@ export const api = {
     request<{ ok: boolean; running: boolean }>("/api/ops/ambient/start", { method: "POST" }),
   ambientStop: () =>
     request<{ ok: boolean; running: boolean }>("/api/ops/ambient/stop", { method: "POST" }),
+  rearm: (account_id: string) =>
+    request<{ ok: boolean; rearmed: Array<{ event_type: string; ts: string }> }>(
+      "/api/ops/rearm_sequence",
+      {
+        method: "POST",
+        body: JSON.stringify({ account_id }),
+      },
+    ),
 };

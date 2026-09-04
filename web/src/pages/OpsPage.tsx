@@ -52,6 +52,7 @@ export function OpsPage() {
   const [seeded, setSeeded] = useState(false);
   const [provisioned, setProvisioned] = useState(false);
   const [injected, setInjected] = useState(false);
+  const [ambientStoppedForRun, setAmbientStoppedForRun] = useState(false);
   const [liveWatchToken, setLiveWatchToken] = useState<string | null>(null);
   const [ambientRunning, setAmbientRunning] = useState(false);
 
@@ -118,8 +119,22 @@ export function OpsPage() {
 
   const doSeed = () => run("seed", () => api.seed(500, 21), () => setSeeded(true));
 
+  const doStopAmbient = () =>
+    run("ambient/stop", () => api.ambientStop(), () => setAmbientStoppedForRun(true));
+
   const doInject = () =>
-    run("inject", () => api.inject(accountId), () => setInjected(true));
+    run(
+      "inject",
+      async () => {
+        // Quiet the rail before Act 3 so the judge watches one row, not noise.
+        await api.ambientStop();
+        setAmbientStoppedForRun(true);
+        return api.inject(accountId);
+      },
+      () => setInjected(true),
+    );
+
+  const doRearm = () => run("rearm", () => api.rearm(accountId));
 
   const doNominate = () =>
     run(
@@ -192,7 +207,18 @@ export function OpsPage() {
                 </button>
               </li>
               <li>
-                {step(3, injected, "Set up the scenario")}
+                {step(3, ambientStoppedForRun, "Stop ambient traffic")}
+                <button
+                  className="btn"
+                  type="button"
+                  disabled={busy}
+                  onClick={doStopAmbient}
+                >
+                  Stop ambient
+                </button>
+              </li>
+              <li>
+                {step(4, injected, "Set up the scenario")}
                 <button
                   className="btn"
                   type="button"
@@ -203,7 +229,7 @@ export function OpsPage() {
                 </button>
               </li>
               <li>
-                {step(4, Boolean(liveWatchToken), "Nominate a trusted contact")}
+                {step(5, Boolean(liveWatchToken), "Nominate a trusted contact")}
                 <button
                   className="btn"
                   type="button"
@@ -214,7 +240,7 @@ export function OpsPage() {
                 </button>
               </li>
               <li>
-                {step(5, Boolean(liveWatchToken), "Open the watch link")}
+                {step(6, Boolean(liveWatchToken), "Open the watch link")}
                 {liveWatchToken ? (
                   <Link className="guide-link" to={`/watch/${liveWatchToken}`} target="_blank">
                     /watch/{liveWatchToken}
@@ -226,13 +252,13 @@ export function OpsPage() {
                 )}
               </li>
               <li>
-                {step(6, false, "Open the console")}
+                {step(7, false, "Open the console")}
                 <Link className="guide-link" to="/console" target="_blank">
                   /console
                 </Link>
               </li>
               <li>
-                {step(7, false, "Hand the judge their QR — they pay on their phone")}
+                {step(8, false, "Hand the judge their QR — they pay on their phone")}
               </li>
             </ol>
           </>
@@ -332,6 +358,15 @@ export function OpsPage() {
             style={{ marginTop: 8 }}
           >
             inject takeover_isolation
+          </button>
+          <button
+            className="btn btn-ghost"
+            type="button"
+            disabled={busy || !accountId}
+            onClick={doRearm}
+            style={{ marginTop: 8 }}
+          >
+            rearm sequence
           </button>
           <button
             className="btn btn-ghost"
