@@ -111,8 +111,30 @@ def graph_payload(
     allowed = {row.id for row in accounts}
     held_ids = _held_account_ids(session)
 
+    stage_handles = {
+        "ramesh@prima",
+        "priya.k@prima",
+        "grocery@prima",
+        "rentals@prima",
+        "quickcash@prima",
+        "merchant.ok@prima",
+    }
+    handle_by_id = {row.id: row.handle for row in accounts}
+
+    def _link_priority(tx: Transaction) -> int:
+        # Keep the demo's own structures (named accounts, seeded attacks) in
+        # the window even when weeks of background traffic would push them
+        # past the recency cut. Mirrors the client-side thinGraph priority.
+        if tx.is_seeded_attack:
+            return 1
+        if handle_by_id.get(tx.sender_id) in stage_handles:
+            return 1
+        if handle_by_id.get(tx.receiver_id) in stage_handles:
+            return 1
+        return 0
+
     txs = list(session.exec(select(Transaction)).all())
-    txs.sort(key=lambda row: _aware(row.attempted_at), reverse=True)
+    txs.sort(key=lambda row: (_link_priority(row), _aware(row.attempted_at)), reverse=True)
     links: list[dict[str, Any]] = []
     linked_ids: set[str] = set()
     for tx in txs:
@@ -136,14 +158,6 @@ def graph_payload(
         if len(links) >= window:
             break
 
-    stage_handles = {
-        "ramesh@prima",
-        "priya.k@prima",
-        "grocery@prima",
-        "rentals@prima",
-        "quickcash@prima",
-        "merchant.ok@prima",
-    }
     nodes = []
     for acct in accounts:
         keep = (

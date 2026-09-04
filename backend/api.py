@@ -44,6 +44,16 @@ async def lifespan(_app: FastAPI):
     get_config()
     create_db_and_tables()
     ensure_smoke_merchant()
+    # Mirror SQL trusted-contact rows into the CircuitBreaker session map so a
+    # watch token from a CLI `python -m backend.sim.seed` (not just the /api/ops
+    # endpoints) has a live /ws/watch channel from the first request.
+    from sqlmodel import Session
+
+    from backend.action.payer_seed import sync_watch_sessions
+    from backend.core.db import engine
+
+    with Session(engine) as _session:
+        sync_watch_sessions(_session)
     yield
 
 
